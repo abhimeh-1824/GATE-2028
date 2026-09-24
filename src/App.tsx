@@ -15,6 +15,7 @@ import { SubjectsView } from './components/views/SubjectsView';
 import { RoadmapView } from './components/views/RoadmapView';
 import { AnalyticsView } from './components/views/AnalyticsView';
 import { CalendarView } from './components/views/CalendarView';
+import { PeerCompareView } from './components/views/PeerCompareView';
 import { SubjectId } from './types';
 
 const MainAppContent: React.FC = () => {
@@ -112,6 +113,8 @@ const MainAppContent: React.FC = () => {
           {activeView === 'Analytics' && <AnalyticsView />}
 
           {activeView === 'Calendar' && <CalendarView />}
+
+          {activeView === 'PeerCompare' && <PeerCompareView />}
         </main>
       </div>
 

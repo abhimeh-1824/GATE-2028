@@ -12,6 +12,19 @@ export type SubjectId =
 export type TopicStatus = 'completed' | 'in_progress' | 'revision_due' | 'unvisited';
 export type TaskType = 'concept' | 'textbook' | 'pyq' | 'revision' | 'test';
 export type PriorityLevel = 'urgent' | 'high' | 'normal';
+export type ResourceType = 'book_pdf' | 'video_tutorial';
+
+export interface StudyResource {
+  id: string;
+  title: string;
+  type: ResourceType;
+  url: string;
+  authorOrChannel?: string;
+  description?: string;
+  subtopicTitle?: string;
+  isStandardReference?: boolean;
+  durationOrPages?: string;
+}
 
 export interface FormulaItem {
   id: string;
@@ -38,6 +51,7 @@ export interface Topic {
   formulas: FormulaItem[];
   commonTraps: string[];
   notes?: string;
+  resources?: StudyResource[];
 }
 
 export interface Subject {
@@ -52,6 +66,7 @@ export interface Subject {
   description: string;
   recommendedBooks: string[];
   topics: Topic[];
+  resources?: StudyResource[];
 }
 
 export interface Task {
@@ -155,4 +170,39 @@ export interface AuthUser {
   avatarUrl?: string;
   createdAt: string;
   isConfirmed?: boolean;
+}
+
+export interface SubjectProgressSummary {
+  subjectId: SubjectId;
+  subjectName: string;
+  shortCode: string;
+  completedTopics: number;
+  totalTopics: number;
+  completionPercent: number;
+  pyqsSolved: number;
+  pyqsTotal: number;
+  pyqAccuracy: number;
+  averageConfidence: number; // 1 to 5
+}
+
+export interface UserProgressProfile {
+  id: string;
+  email: string;
+  fullName: string;
+  avatarUrl?: string;
+  targetAir: number;
+  targetCollege: string;
+  targetYear: number;
+  syllabusPercent: number;
+  totalHoursStudied: number;
+  totalPyqsSolved: number;
+  totalPyqsOverall: number;
+  overallPyqAccuracy: number;
+  mockTestsTaken: number;
+  mockAverageScore: number;
+  studyStreakDays: number;
+  lastActive: string;
+  isCurrentUser?: boolean;
+  subjects: SubjectProgressSummary[];
+  fullSubjects?: Subject[];
 }

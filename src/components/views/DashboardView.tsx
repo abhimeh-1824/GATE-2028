@@ -13,7 +13,8 @@ import {
   RotateCcw,
   Sigma,
   Calendar,
-  ChevronRight
+  ChevronRight,
+  Users
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
 import { soundManager } from '../../utils/audio';
@@ -210,6 +211,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </span>
           </div>
         </div>
+      </section>
+
+      {/* Peer Benchmarking & Comparison Quick Banner */}
+      <section className="bg-slate-900 text-white rounded-xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 border border-slate-800">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-300 shrink-0">
+            <Users className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold text-indigo-300 font-mono uppercase tracking-wider">
+                READ-ONLY PEER BENCHMARKING
+              </span>
+              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.5 rounded font-mono">
+                Live Database Telemetry
+              </span>
+            </div>
+            <h3 className="text-base font-bold text-white mt-0.5">
+              Compare Your Progress &amp; 8-Subject Mastery with Real Peers
+            </h3>
+            <p className="text-xs text-slate-300 mt-0.5">
+              Multi-user radar spider charts, side-by-side metric bars, and read-only syllabus audits powered strictly by Supabase database records.
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => setActiveView('PeerCompare')}
+          className="px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-2 transition-colors shrink-0 shadow-sm"
+        >
+          <span>Open Comparison Charts</span>
+          <ArrowUpRight className="w-4 h-4" />
+        </button>
       </section>
 
       {/* Supabase-powered Needs Revision Targeted Study Widget */}

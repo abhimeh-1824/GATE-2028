@@ -12,7 +12,8 @@ import {
   VolumeX,
   RotateCcw,
   BookMarked,
-  Award
+  Award,
+  Users
 } from 'lucide-react';
 import { useStudy } from '../context/StudyContext';
 import { soundManager } from '../utils/audio';
@@ -74,10 +75,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'Subjects',
-      label: 'Subjects Mastery',
+      label: 'Subjects & Video/PDFs',
       icon: BookOpen,
-      badge: `${subjects.length} Total`,
-      badgeColor: 'text-slate-600 bg-slate-100',
+      badge: 'PDFs & Lectures',
+      badgeColor: 'text-indigo-700 bg-indigo-50 font-mono font-bold',
     },
     {
       id: 'Roadmap',
@@ -97,6 +98,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Exam Calendar',
       icon: Calendar,
       badge: null,
+    },
+    {
+      id: 'PeerCompare',
+      label: 'Peer Benchmarking',
+      icon: Users,
+      badge: 'Compare',
+      badgeColor: 'text-indigo-700 bg-indigo-50 font-mono',
     },
   ];
 

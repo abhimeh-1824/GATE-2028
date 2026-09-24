@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, BookOpen, Sigma, CheckSquare, ChevronRight, ArrowRight } from 'lucide-react';
+import { Search, X, BookOpen, Sigma, CheckSquare, ChevronRight, ArrowRight, Video, ExternalLink } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
+import { DEFAULT_SUBJECT_RESOURCES, DEFAULT_TOPIC_RESOURCES } from '../../data/subjectResources';
 
 interface OmniboxModalProps {
   isOpen: boolean;
@@ -62,6 +63,54 @@ export const OmniboxModal: React.FC<OmniboxModalProps> = ({
     formulaPlain: string;
     formulaId: string;
   }> = [];
+
+  // Search in book PDFs and tutorial videos
+  const matchingResources: Array<{
+    title: string;
+    type: 'book_pdf' | 'video_tutorial';
+    authorOrChannel?: string;
+    url: string;
+    durationOrPages?: string;
+  }> = [];
+
+  if (cleanQuery) {
+    Object.values(DEFAULT_SUBJECT_RESOURCES).flat().forEach((res) => {
+      if (
+        res.title.toLowerCase().includes(cleanQuery) ||
+        res.description?.toLowerCase().includes(cleanQuery) ||
+        res.authorOrChannel?.toLowerCase().includes(cleanQuery)
+      ) {
+        if (!matchingResources.some((r) => r.url === res.url)) {
+          matchingResources.push({
+            title: res.title,
+            type: res.type,
+            authorOrChannel: res.authorOrChannel,
+            url: res.url,
+            durationOrPages: res.durationOrPages,
+          });
+        }
+      }
+    });
+
+    Object.values(DEFAULT_TOPIC_RESOURCES).flat().forEach((res) => {
+      if (
+        res.title.toLowerCase().includes(cleanQuery) ||
+        res.description?.toLowerCase().includes(cleanQuery) ||
+        res.authorOrChannel?.toLowerCase().includes(cleanQuery) ||
+        res.subtopicTitle?.toLowerCase().includes(cleanQuery)
+      ) {
+        if (!matchingResources.some((r) => r.url === res.url)) {
+          matchingResources.push({
+            title: res.title,
+            type: res.type,
+            authorOrChannel: res.authorOrChannel,
+            url: res.url,
+            durationOrPages: res.durationOrPages,
+          });
+        }
+      }
+    });
+  }
 
   // Search in tasks
   const matchingTasks = tasks.filter((t) =>
@@ -234,9 +283,50 @@ export const OmniboxModal: React.FC<OmniboxModalProps> = ({
             </div>
           )}
 
-          {matchingTopics.length === 0 && matchingFormulas.length === 0 && matchingTasks.length === 0 && (
+          {/* Matching Book PDFs & Video Tutorials */}
+          {matchingResources.length > 0 && (
+            <div>
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 mb-1.5 flex items-center gap-1.5">
+                <Video className="w-3.5 h-3.5 text-rose-500" />
+                <span>Textbook PDFs &amp; Video Tutorials ({matchingResources.length})</span>
+              </div>
+              <div className="space-y-1">
+                {matchingResources.slice(0, 4).map((res, idx) => {
+                  const isVid = res.type === 'video_tutorial';
+                  return (
+                    <a
+                      key={idx}
+                      href={res.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-indigo-50/50 text-left transition-colors group"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        {isVid ? (
+                          <Video className="w-4 h-4 text-rose-600 shrink-0" />
+                        ) : (
+                          <BookOpen className="w-4 h-4 text-indigo-600 shrink-0" />
+                        )}
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-slate-800 truncate group-hover:text-indigo-600 transition-colors">
+                            {res.title}
+                          </div>
+                          <div className="text-[11px] text-slate-500 font-mono truncate">
+                            {res.authorOrChannel} &bull; {res.durationOrPages}
+                          </div>
+                        </div>
+                      </div>
+                      <ExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 shrink-0" />
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {matchingTopics.length === 0 && matchingFormulas.length === 0 && matchingTasks.length === 0 && matchingResources.length === 0 && (
             <div className="p-8 text-center text-slate-400 text-xs">
-              No syllabus elements or formulas found matching "{query}".
+              No syllabus elements, formulas, or study resources found matching "{query}".
             </div>
           )}
         </div>
