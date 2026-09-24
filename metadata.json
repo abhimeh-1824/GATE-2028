@@ -1,0 +1,6 @@
+{
+  "name": "GATE DA 2028 Study Tracker",
+  "description": "Precision academic study tracker, syllabus roadmap, analytics, and spaced-repetition revision planner for GATE Data Science & AI 2028.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
