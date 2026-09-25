@@ -33,6 +33,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const [activeTab, setActiveTab] = useState<'login' | 'register' | 'switch'>(defaultTab);
 
+  React.useEffect(() => {
+    if (isOpen) {
+      setActiveTab(defaultTab);
+    }
+  }, [defaultTab, isOpen]);
+
   // Form states
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -242,7 +248,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             </div>
 
-            <div className="pt-2">
+            <div className="pt-2 flex flex-col gap-2">
               <button
                 type="submit"
                 disabled={isLoading}
@@ -256,6 +262,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <span>Sign In to Study Tracker</span>
                   </>
                 )}
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsLoading(true);
+                  await register(
+                    'demo.gate2028@aspirant.local',
+                    'DemoPass123!',
+                    'Demo Aspirant (AIR 1)',
+                    1,
+                    'IISc Bangalore (M.Tech AI)'
+                  );
+                  setIsLoading(false);
+                  onClose();
+                }}
+                className="w-full py-2 border border-purple-200 bg-purple-50/70 hover:bg-purple-100 text-purple-800 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                <span>Instant Demo Access (No Password Required)</span>
               </button>
             </div>
 

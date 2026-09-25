@@ -27,14 +27,22 @@ app.get(['/api/health', '/health', '/healthz'], (_req, res) => {
   res.status(200).json({ status: 'ok', uptime: process.uptime() });
 });
 
-// Applet Sync API routes for cross-applet synchronization
+// Applet Sync API routes with sanitization & payload schema validation
 const LINKED_APPLET_ID = '2a25406d-a516-461a-aab7-208d3865f39c';
 
 app.post(['/api/sync/linked', `/api/sync/${LINKED_APPLET_ID}`, '/api/sync/:appletId'], (req, res) => {
-  const targetId = req.params.appletId || LINKED_APPLET_ID;
-  const payload = req.body;
-  const updatedAt = new Date().toISOString();
+  const rawId = req.params.appletId || LINKED_APPLET_ID;
+  const targetId = rawId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+  if (!targetId) {
+    return res.status(400).json({ success: false, error: 'Invalid applet ID' });
+  }
 
+  const payload = req.body;
+  if (!payload || typeof payload !== 'object') {
+    return res.status(400).json({ success: false, error: 'Invalid payload structure' });
+  }
+
+  const updatedAt = new Date().toISOString();
   appletSyncStorage.set(targetId, { payload, updatedAt });
 
   try {
@@ -53,7 +61,12 @@ app.post(['/api/sync/linked', `/api/sync/${LINKED_APPLET_ID}`, '/api/sync/:apple
 });
 
 app.get(['/api/sync/linked', `/api/sync/${LINKED_APPLET_ID}`, '/api/sync/:appletId'], (req, res) => {
-  const targetId = req.params.appletId || LINKED_APPLET_ID;
+  const rawId = req.params.appletId || LINKED_APPLET_ID;
+  const targetId = rawId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+  if (!targetId) {
+    return res.status(400).json({ success: false, error: 'Invalid applet ID' });
+  }
+
   let record = appletSyncStorage.get(targetId);
 
   if (!record) {

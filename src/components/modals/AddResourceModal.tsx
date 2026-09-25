@@ -54,8 +54,19 @@ export const AddResourceModal: React.FC<AddResourceModalProps> = ({
       setError('Please provide a title for the resource.');
       return;
     }
-    if (!url.trim() || !url.startsWith('http')) {
-      setError('Please enter a valid URL starting with http:// or https://');
+    if (!url.trim()) {
+      setError('Please enter a valid URL.');
+      return;
+    }
+
+    try {
+      const parsedUrl = new URL(url.trim());
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        setError('Only secure HTTP and HTTPS web URLs are permitted.');
+        return;
+      }
+    } catch {
+      setError('Invalid web URL format. Please include http:// or https://');
       return;
     }
 

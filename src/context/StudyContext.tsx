@@ -144,12 +144,9 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [allUsers, setAllUsers] = useState<AuthUser[]>(() => getSavedAccounts());
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
     const activeId = getActiveUserId();
+    if (!activeId) return null;
     const saved = getSavedAccounts();
-    if (activeId) {
-      return saved.find((u) => u.id === activeId) || null;
-    }
-    // If there's an account, default to the first one, or null
-    return saved.length > 0 ? saved[0] : null;
+    return saved.find((u) => u.id === activeId) || null;
   });
 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -369,8 +366,9 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setSettings(data.settings);
     setBaseLoggedHours(data.baseLoggedHours);
 
-    // Attempt to load tasks from Supabase cloud
+    // Attempt to load tasks from Supabase cloud with user verification to prevent race conditions
     loadTasksFromSupabase(target.id).then((remoteTasks) => {
+      if (getActiveUserId() !== target.id) return;
       if (remoteTasks.length > 0) {
         setTasks((prev) => {
           const merged = [...prev];
@@ -464,32 +462,36 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setSettings(INITIAL_SETTINGS);
   };
 
-  // Timer Tick
+  // Timer Tick - Stable interval without recreating every second
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    if (timerState.isRunning && timerState.timeLeft > 0) {
-      interval = setInterval(() => {
-        setTimerState((prev) => ({
+    if (!timerState.isRunning) return;
+
+    const interval = setInterval(() => {
+      setTimerState((prev) => {
+        if (!prev.isRunning) return prev;
+        if (prev.timeLeft <= 1) {
+          soundManager.playFocusAlert();
+          if (prev.mode === 'focus') {
+            const mins = Math.round(prev.initialTime / 60);
+            addStudySessionHours(mins, prev.subjectId, prev.topicTitle);
+          }
+          return {
+            ...prev,
+            timeLeft: 0,
+            isRunning: false,
+          };
+        }
+        return {
           ...prev,
           timeLeft: prev.timeLeft - 1,
-        }));
-      }, 1000);
-    } else if (timerState.isRunning && timerState.timeLeft === 0) {
-      soundManager.playFocusAlert();
-      if (timerState.mode === 'focus') {
-        const mins = Math.round(timerState.initialTime / 60);
-        addStudySessionHours(mins, timerState.subjectId, timerState.topicTitle);
-      }
-      setTimerState((prev) => ({
-        ...prev,
-        isRunning: false,
-      }));
-    }
+        };
+      });
+    }, 1000);
 
     return () => {
-      if (interval) clearInterval(interval);
+      clearInterval(interval);
     };
-  }, [timerState.isRunning, timerState.timeLeft, timerState.mode, timerState.initialTime, timerState.subjectId, timerState.topicTitle]);
+  }, [timerState.isRunning]);
 
   // Calculated Metrics
   const allTopics = subjects.flatMap((s) => s.topics);
@@ -662,13 +664,38 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const importDataJson = (jsonStr: string): boolean => {
     try {
       const data = JSON.parse(jsonStr);
-      if (data.subjects) setSubjects(data.subjects);
-      if (data.tasks) setTasks(data.tasks);
-      if (data.mockTests) setMockTests(data.mockTests);
-      if (data.milestones) setMilestones(data.milestones);
-      if (data.calendarEvents) setCalendarEvents(data.calendarEvents);
-      if (data.settings) setSettings(data.settings);
-      if (data.baseLoggedHours !== undefined) setBaseLoggedHours(data.baseLoggedHours);
+      if (!data || typeof data !== 'object') return false;
+
+      // Validate subjects array if provided
+      if (data.subjects) {
+        if (!Array.isArray(data.subjects) || data.subjects.length === 0) return false;
+        const validIds = new Set([
+          'prob_stat',
+          'linear_algebra',
+          'calculus_opt',
+          'dsa_python',
+          'dbms_warehouse',
+          'machine_learning',
+          'artificial_intel',
+          'general_aptitude',
+          'mock_pyq',
+        ]);
+        const isValid = data.subjects.some((s: any) => s && validIds.has(s.id) && Array.isArray(s.topics));
+        if (!isValid) return false;
+        setSubjects(data.subjects);
+      }
+
+      if (Array.isArray(data.tasks)) setTasks(data.tasks);
+      if (Array.isArray(data.mockTests)) setMockTests(data.mockTests);
+      if (Array.isArray(data.milestones)) setMilestones(data.milestones);
+      if (Array.isArray(data.calendarEvents)) setCalendarEvents(data.calendarEvents);
+      if (data.settings && typeof data.settings === 'object') {
+        setSettings((prev) => ({ ...prev, ...data.settings }));
+      }
+      if (typeof data.baseLoggedHours === 'number' && data.baseLoggedHours >= 0) {
+        setBaseLoggedHours(data.baseLoggedHours);
+      }
+
       soundManager.playCompletionChime();
       return true;
     } catch {

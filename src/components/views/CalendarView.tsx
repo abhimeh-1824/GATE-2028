@@ -15,11 +15,12 @@ import { CalendarEvent } from '../../types';
 export const CalendarView: React.FC = () => {
   const { calendarEvents, addCalendarEvent, settings } = useStudy();
 
-  const [currentYear, setCurrentYear] = useState(2026);
-  const [currentMonth, setCurrentMonth] = useState(8); // 8 is September (0-indexed)
+  const now = new Date();
+  const [currentYear, setCurrentYear] = useState(now.getFullYear());
+  const [currentMonth, setCurrentMonth] = useState(now.getMonth());
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
-  const [newDate, setNewDate] = useState('2026-09-25');
+  const [newDate, setNewDate] = useState(now.toISOString().split('T')[0]);
   const [newType, setNewType] = useState<'mock' | 'revision' | 'milestone' | 'study_block'>('study_block');
   const [newTime, setNewTime] = useState('09:00 AM');
 

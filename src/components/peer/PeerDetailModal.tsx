@@ -34,6 +34,13 @@ export const PeerDetailModal: React.FC<PeerDetailModalProps> = ({
 }) => {
   if (!isOpen || !peer) return null;
 
+  return <PeerDetailModalContent peer={peer} onClose={onClose} />;
+};
+
+const PeerDetailModalContent: React.FC<{
+  peer: UserProgressProfile;
+  onClose: () => void;
+}> = ({ peer, onClose }) => {
   const [selectedSubjectId, setSelectedSubjectId] = useState<SubjectId>(
     (peer.subjects[0]?.subjectId as SubjectId) || 'prob_stat'
   );

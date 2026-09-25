@@ -158,13 +158,13 @@ export const PeerCompareView: React.FC = () => {
               </span>
               <span className="text-slate-300">·</span>
               <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold border border-emerald-200">
-                <Database className="w-3 h-3" />
-                REAL DATABASE DATA
+                <CheckCircle2 className="w-3 h-3" />
+                VERIFIED ASPIRANTS
               </span>
               <span className="text-slate-300">·</span>
-              <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold border border-amber-200">
-                <Lock className="w-3 h-3" />
-                READ-ONLY TELEMETRY
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-bold border border-indigo-200">
+                <Award className="w-3 h-3" />
+                COHORT TELEMETRY
               </span>
             </div>
 
@@ -173,23 +173,23 @@ export const PeerCompareView: React.FC = () => {
             </h1>
 
             <p className="text-xs text-slate-600 leading-relaxed">
-              Transparent, read-only academic benchmarking powered strictly by live database records. Compare your syllabus coverage, problem-solving accuracy, logged study hours, and mock test scores with real registered GATE DA aspirants.
+              Transparent academic benchmarking. Compare your syllabus coverage, problem-solving accuracy, logged study hours, and mock test scores with verified GATE DA aspirants across India.
             </p>
           </div>
 
-          {/* Database Operations & Sync Bar */}
+          {/* Sync & Refresh Bar */}
           <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl min-w-[280px] text-xs space-y-2.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                 <span className="font-bold text-slate-800 font-mono text-[11px]">
-                  Supabase Live: {profiles.length} Real {profiles.length === 1 ? 'Aspirant' : 'Aspirants'}
+                  Active Cohort: {profiles.length} Verified {profiles.length === 1 ? 'Aspirant' : 'Aspirants'}
                 </span>
               </div>
               <button
                 onClick={loadRealPeers}
                 disabled={isLoading}
-                title="Refresh peer data from Supabase"
+                title="Refresh cohort leaderboard"
                 className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-indigo-600' : ''}`} />
@@ -205,12 +205,12 @@ export const PeerCompareView: React.FC = () => {
                 {isSyncing ? (
                   <>
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Syncing to DB...</span>
+                    <span>Updating Ranking...</span>
                   </>
                 ) : (
                   <>
                     <UploadCloud className="w-3.5 h-3.5" />
-                    <span>Sync My Progress to DB</span>
+                    <span>Update My Benchmark Ranking</span>
                   </>
                 )}
               </button>

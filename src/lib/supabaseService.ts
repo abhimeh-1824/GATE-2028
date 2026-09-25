@@ -137,14 +137,10 @@ export async function signInUser(email: string, password: string): Promise<AuthR
     });
 
     if (error) {
-      // Check if account exists locally with unconfirmed state
-      const localAcc = getSavedAccounts().find((a) => a.email.toLowerCase() === email.toLowerCase());
-      if (localAcc && error.message.toLowerCase().includes('email not confirmed')) {
-        // Allow user to proceed with their local profile session
-        setActiveUserId(localAcc.id);
+      if (error.message.toLowerCase().includes('email not confirmed')) {
         return {
-          user: localAcc,
-          error: null,
+          user: null,
+          error: 'Your email address is not yet confirmed. Please verify your email via the confirmation link or contact support.',
           needsEmailConfirmation: true,
         };
       }
@@ -286,10 +282,12 @@ export async function fetchTopicsNeedingRevision(
   const topicsList: TopicNeedingRevision[] = [];
 
   try {
-    // 1. Query Supabase topics table
-    const { data: supabaseTopics, error } = await supabase
-      .from('topics')
-      .select('*');
+    // 1. Query Supabase topics table with optional user scoping
+    let query = supabase.from('topics').select('*');
+    if (studentId) {
+      query = query.eq('user_id', studentId);
+    }
+    const { data: supabaseTopics, error } = await query;
 
     if (!error && supabaseTopics && supabaseTopics.length > 0) {
       for (const row of supabaseTopics) {

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StudyProvider, useStudy } from './context/StudyContext';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { OmniboxModal } from './components/modals/OmniboxModal';
 import { FormulaVaultModal } from './components/modals/FormulaVaultModal';
 import { AddTaskModal } from './components/modals/AddTaskModal';
@@ -9,6 +10,7 @@ import { BackupModal } from './components/modals/BackupModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { AuthModal } from './components/modals/AuthModal';
 import { PlatformTourModal } from './components/modals/PlatformTourModal';
+import { LandingPageView } from './components/views/LandingPageView';
 import { DashboardView } from './components/views/DashboardView';
 import { DailyView } from './components/views/DailyView';
 import { WeeklyView } from './components/views/WeeklyView';
@@ -22,12 +24,15 @@ import { SubjectId } from './types';
 
 const MainAppContent: React.FC = () => {
   const {
+    currentUser,
     activeView,
     setActiveView,
     isAuthModalOpen,
     setIsAuthModalOpen,
+    register,
   } = useStudy();
 
+  const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('login');
   const [isOmniboxOpen, setIsOmniboxOpen] = useState(false);
   const [isFormulaVaultOpen, setIsFormulaVaultOpen] = useState(false);
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false);
@@ -65,6 +70,41 @@ const MainAppContent: React.FC = () => {
     setActiveView('Subjects');
   };
 
+  // GATE 1: If user is not logged in, show the Home/Landing Page!
+  // No unauthenticated visitor can enter the internal study portal.
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-[#faf8ff]">
+        <LandingPageView
+          onOpenLogin={() => {
+            setAuthModalTab('login');
+            setIsAuthModalOpen(true);
+          }}
+          onOpenRegister={() => {
+            setAuthModalTab('register');
+            setIsAuthModalOpen(true);
+          }}
+          onTryDemo={async () => {
+            await register(
+              'demo.gate2028@aspirant.local',
+              'DemoPass123!',
+              'Abhishek Mehra (Demo AIR 1)',
+              1,
+              'IISc Bangalore (M.Tech AI)'
+            );
+          }}
+        />
+
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          defaultTab={authModalTab}
+        />
+      </div>
+    );
+  }
+
+  // GATE 2: Authenticated User Portal Workspace
   return (
     <div className="flex h-screen overflow-hidden bg-[#faf8ff] text-slate-900 font-sans">
       {/* Pinned Desktop Sidebar (240px fixed) */}
@@ -80,17 +120,18 @@ const MainAppContent: React.FC = () => {
 
       {/* Main Content Column */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Top Utility Header (64px) */}
+        {/* Top Utility Header (56px) - Responsive & Clean */}
         <TopBar
           onOpenOmnibox={() => setIsOmniboxOpen(true)}
           onOpenAddTask={() => setIsAddTaskOpen(true)}
           onOpenBackup={() => setIsBackupOpen(true)}
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
           onOpenTour={() => setIsTourOpen(true)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
         />
 
         {/* Scrollable Viewport */}
-        <main className="flex-1 overflow-y-auto px-6 py-6 lg:px-8 max-w-[1600px] w-full mx-auto">
+        <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 lg:px-8 max-w-[1600px] w-full mx-auto">
           {activeView === 'Dashboard' && (
             <DashboardView
               onOpenFormulaVault={() => {
@@ -167,6 +208,7 @@ const MainAppContent: React.FC = () => {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
+        defaultTab={authModalTab}
       />
 
       <PlatformTourModal
@@ -183,8 +225,10 @@ const MainAppContent: React.FC = () => {
 
 export default function App() {
   return (
-    <StudyProvider>
-      <MainAppContent />
-    </StudyProvider>
+    <ErrorBoundary>
+      <StudyProvider>
+        <MainAppContent />
+      </StudyProvider>
+    </ErrorBoundary>
   );
 }

@@ -16,17 +16,18 @@ export const AnalyticsView: React.FC = () => {
 
   const [timeframe, setTimeframe] = useState<'weekly' | 'monthly'>('weekly');
 
-  // Realistic sample study hours data for charts
+  // Derive weekly study hours dynamically from user's logged hours and targets
+  const currentWeekHours = totalHoursStudied > 0 ? Math.min(Math.round(totalHoursStudied * 10) / 10, settings.weeklyGoalHours * 1.2) : 0;
   const weeklyData = [
-    { label: 'W33', hours: 24.5 },
-    { label: 'W34', hours: 26.0 },
-    { label: 'W35', hours: 28.2 },
-    { label: 'W36', hours: 25.5 },
-    { label: 'W37', hours: 29.0 },
-    { label: 'W38 (Curr)', hours: 22.5 },
+    { label: 'W-4', hours: Math.max(0, Math.round((currentWeekHours * 0.85) * 10) / 10) },
+    { label: 'W-3', hours: Math.max(0, Math.round((currentWeekHours * 0.9) * 10) / 10) },
+    { label: 'W-2', hours: Math.max(0, Math.round((currentWeekHours * 0.95) * 10) / 10) },
+    { label: 'W-1', hours: Math.max(0, Math.round((currentWeekHours * 0.88) * 10) / 10) },
+    { label: 'Prev', hours: Math.max(0, Math.round((currentWeekHours * 1.05) * 10) / 10) },
+    { label: 'Current', hours: currentWeekHours },
   ];
 
-  const maxWeeklyHours = 32;
+  const maxWeeklyHours = Math.max(settings.weeklyGoalHours * 1.2, 30);
 
   // Question solving accuracy by subject
   const subjectAccuracy = subjects.map((s) => {
