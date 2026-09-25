@@ -205,11 +205,11 @@ export async function getAllPeerProfilesFromDatabase(
   let dbConnected = false;
   let dbMessage = 'Connected to Supabase';
 
-  // 1. Current user (real active user)
+  // 1. Current user (active user or generic fallback)
   const activeUser: AuthUser = currentUser || {
-    id: 'current_active_user',
-    email: 'abhishekmehra1245@gmail.com',
-    fullName: currentSettings.userName || 'Abhishek Mehra',
+    id: 'demo_aspirant_gate_da_2028',
+    email: 'demo.aspirant@gate-da.example.com',
+    fullName: currentSettings.userName || 'Demo Aspirant',
     targetAir: currentSettings.targetAir || 1,
     targetCollege: currentSettings.targetCollege || 'IISc Bangalore (M.Tech AI)',
     createdAt: new Date().toISOString(),

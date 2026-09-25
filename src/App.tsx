@@ -29,7 +29,7 @@ const MainAppContent: React.FC = () => {
     setActiveView,
     isAuthModalOpen,
     setIsAuthModalOpen,
-    register,
+    loginAsDemo,
   } = useStudy();
 
   const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('login');
@@ -85,15 +85,7 @@ const MainAppContent: React.FC = () => {
             setAuthModalTab('register');
             setIsAuthModalOpen(true);
           }}
-          onTryDemo={async () => {
-            await register(
-              'demo.gate2028@aspirant.local',
-              'DemoPass123!',
-              'Abhishek Mehra (Demo AIR 1)',
-              1,
-              'IISc Bangalore (M.Tech AI)'
-            );
-          }}
+          onTryDemo={loginAsDemo}
         />
 
         <AuthModal

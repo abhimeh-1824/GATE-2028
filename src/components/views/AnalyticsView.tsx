@@ -183,55 +183,74 @@ export const AnalyticsView: React.FC = () => {
               Mock Test Score Progression (100 Marks CBT)
             </h2>
             <p className="text-[11px] text-slate-500">
-              Scores rising from 64.33 $\to$ 74.00, targeting 85+ by CBT Phase 5
+              {mockTests.length > 0
+                ? `${mockTests.length} CBT Full-Length Mock ${mockTests.length === 1 ? 'Exam' : 'Exams'} Recorded`
+                : 'No CBT mock tests recorded yet. Record your full-length practice tests here.'}
             </p>
           </div>
-          <div className="flex items-center gap-3 text-xs font-mono">
-            <span className="text-indigo-700 font-bold">Latest Score: 74.00</span>
-            <span className="text-slate-300">·</span>
-            <span className="text-emerald-600 font-bold">99.6th Percentile</span>
-          </div>
-        </div>
-
-        {/* Visual Mock Test Timeline Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {mockTests.map((mock, i) => (
-            <div
-              key={mock.id}
-              className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-800">
-                  {mock.title}
-                </span>
-                <span className="text-[10px] font-mono text-slate-400">
-                  {mock.date}
-                </span>
-              </div>
-
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-extrabold text-indigo-700 font-mono">
-                  {mock.score.toFixed(2)}
-                </span>
-                <span className="text-xs text-slate-400 font-mono">/ 100</span>
-              </div>
-
-              <div className="pt-2 border-t border-slate-200/80 text-[11px] flex justify-between text-slate-600 font-mono">
-                <span>Accuracy: {mock.accuracy}%</span>
-                <span className="text-emerald-600 font-bold">
-                  {mock.percentile} Percentile
-                </span>
-              </div>
-
-              <div className="text-[11px] text-slate-500">
-                <div className="font-semibold text-slate-700 mb-0.5">Strengths:</div>
-                <div className="truncate text-[10px]">
-                  {mock.strongAreas.join(', ')}
-                </div>
-              </div>
+          {mockTests.length > 0 && (
+            <div className="flex items-center gap-3 text-xs font-mono">
+              <span className="text-indigo-700 font-bold">
+                Latest Score: {mockTests[mockTests.length - 1].score.toFixed(2)}
+              </span>
+              <span className="text-slate-300">·</span>
+              <span className="text-emerald-600 font-bold">
+                {mockTests[mockTests.length - 1].percentile}th Percentile
+              </span>
             </div>
-          ))}
+          )}
         </div>
+
+        {/* Visual Mock Test Timeline Cards or Empty State */}
+        {mockTests.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {mockTests.map((mock) => (
+              <div
+                key={mock.id}
+                className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800">
+                    {mock.title}
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    {mock.date}
+                  </span>
+                </div>
+
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-extrabold text-indigo-700 font-mono">
+                    {mock.score.toFixed(2)}
+                  </span>
+                  <span className="text-xs text-slate-400 font-mono">/ 100</span>
+                </div>
+
+                <div className="pt-2 border-t border-slate-200/80 text-[11px] flex justify-between text-slate-600 font-mono">
+                  <span>Accuracy: {mock.accuracy}%</span>
+                  <span className="text-emerald-600 font-bold">
+                    {mock.percentile} Percentile
+                  </span>
+                </div>
+
+                {mock.strongAreas && mock.strongAreas.length > 0 && (
+                  <div className="text-[11px] text-slate-500">
+                    <div className="font-semibold text-slate-700 mb-0.5">Strengths:</div>
+                    <div className="truncate text-[10px]">
+                      {mock.strongAreas.join(', ')}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="p-8 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/50 text-center space-y-2">
+            <p className="text-xs font-semibold text-slate-700">No Mock CBT Tests Recorded Yet</p>
+            <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+              As you complete 100-mark full syllabus simulations or subject tests, record them to view your accuracy curve, percentile projections, and AIR predictions.
+            </p>
+          </div>
+        )}
       </section>
 
       {/* 52-Week Consistency & Habit Activity Grid */}

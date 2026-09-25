@@ -198,17 +198,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div>
             <div className="text-xs font-semibold text-slate-500 mb-1">Latest Mock CBT</div>
             <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-extrabold text-indigo-700 font-mono">
-                {latestMock ? latestMock.score.toFixed(1) : '74.0'}
-              </span>
-              <span className="text-xs text-slate-400 font-mono">/ 100</span>
+              {latestMock ? (
+                <>
+                  <span className="text-2xl font-extrabold text-indigo-700 font-mono">
+                    {latestMock.score.toFixed(1)}
+                  </span>
+                  <span className="text-xs text-slate-400 font-mono">/ 100</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-2xl font-extrabold text-slate-400 font-mono">
+                    —
+                  </span>
+                  <span className="text-xs text-slate-400 font-mono">/ 100</span>
+                </>
+              )}
             </div>
           </div>
 
           <div className="mt-4 pt-2 border-t border-slate-100 text-[11px] text-slate-500 flex items-center justify-between">
-            <span>Predicted Percentile</span>
-            <span className="font-mono font-bold text-emerald-600">
-              {latestMock ? latestMock.percentile : 99.6}% (AIR &lt; 10)
+            <span>{latestMock ? 'Predicted Percentile' : 'Status'}</span>
+            <span className={`font-mono font-bold ${latestMock ? 'text-emerald-600' : 'text-slate-400'}`}>
+              {latestMock ? `${latestMock.percentile}% (AIR < 10)` : 'No tests recorded yet'}
             </span>
           </div>
         </div>

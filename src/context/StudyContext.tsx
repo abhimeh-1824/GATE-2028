@@ -29,6 +29,7 @@ import {
   signInUser,
   signOutUser,
   getSavedAccounts,
+  saveAccountLocally,
   getActiveUserId,
   setActiveUserId,
   syncTaskToSupabase,
@@ -66,6 +67,7 @@ interface StudyContextType {
   ) => Promise<{ success: boolean; error?: string; needsEmailConfirmation?: boolean }>;
   logout: () => void;
   switchUser: (userId: string) => void;
+  loginAsDemo: () => void;
 
   // Supabase Database Sync
   isDbConnected: boolean;
@@ -474,6 +476,39 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setSettings(INITIAL_SETTINGS);
   };
 
+  const loginAsDemo = useCallback(() => {
+    const demoUser: AuthUser = {
+      id: 'demo_aspirant_gate_da_2028',
+      email: 'demo.aspirant@gate-da.example.com',
+      fullName: 'Demo Aspirant',
+      targetAir: 1,
+      targetCollege: 'IISc Bangalore (M.Tech AI)',
+      createdAt: new Date().toISOString(),
+      isConfirmed: true,
+    };
+
+    saveAccountLocally(demoUser);
+    setActiveUserId(demoUser.id);
+    setCurrentUser(demoUser);
+    setAllUsers(getSavedAccounts());
+
+    const data = loadInitialData(demoUser);
+    setSubjects(data.subjects);
+    setTasks(data.tasks);
+    setMockTests(data.mockTests);
+    setMilestones(data.milestones);
+    setCalendarEvents(data.calendarEvents);
+    setSettings({
+      ...data.settings,
+      userName: demoUser.fullName,
+      targetAir: 1,
+      targetCollege: 'IISc Bangalore (M.Tech AI)',
+    });
+    setBaseLoggedHours(data.baseLoggedHours);
+
+    soundManager.playCompletionChime();
+  }, []);
+
   // Timer Tick - Stable interval without recreating every second
   useEffect(() => {
     if (!timerState.isRunning) return;
@@ -871,6 +906,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         register,
         logout,
         switchUser,
+        loginAsDemo,
         isDbConnected,
         isSyncingDb,
         dbSyncMessage,

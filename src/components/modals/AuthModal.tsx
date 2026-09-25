@@ -29,7 +29,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   defaultTab = 'login',
 }) => {
-  const { currentUser, allUsers, login, register, switchUser, logout } = useStudy();
+  const { currentUser, allUsers, login, register, switchUser, logout, loginAsDemo } = useStudy();
 
   const [activeTab, setActiveTab] = useState<'login' | 'register' | 'switch'>(defaultTab);
 
@@ -266,16 +266,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
               <button
                 type="button"
-                onClick={async () => {
-                  setIsLoading(true);
-                  await register(
-                    'demo.gate2028@aspirant.local',
-                    'DemoPass123!',
-                    'Demo Aspirant (AIR 1)',
-                    1,
-                    'IISc Bangalore (M.Tech AI)'
-                  );
-                  setIsLoading(false);
+                onClick={() => {
+                  loginAsDemo();
                   onClose();
                 }}
                 className="w-full py-2 border border-purple-200 bg-purple-50/70 hover:bg-purple-100 text-purple-800 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
@@ -313,7 +305,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Abhishek Mehra"
+                  placeholder="e.g. Rahul Sharma"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   className="w-full pl-9 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:border-indigo-600 outline-hidden"
