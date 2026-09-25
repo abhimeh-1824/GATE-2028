@@ -118,8 +118,7 @@ export const PeerCompareView: React.FC = () => {
     return profiles.filter((p) => {
       const matchSearch =
         p.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.targetCollege.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.email.toLowerCase().includes(searchQuery.toLowerCase());
+        p.targetCollege.toLowerCase().includes(searchQuery.toLowerCase());
 
       if (!matchSearch) return false;
 

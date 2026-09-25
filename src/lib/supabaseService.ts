@@ -204,18 +204,24 @@ export async function signOutUser(): Promise<void> {
 /**
  * Sync a task to Supabase study_tasks table
  */
-export async function syncTaskToSupabase(task: Task, studentId: string) {
-  // Prevent 401 RLS warnings for demo and guest accounts
-  if (!studentId || studentId.startsWith('demo_') || studentId.startsWith('guest_') || studentId.includes('aspirant')) {
+export async function syncTaskToSupabase(task: Task, studentId?: string) {
+  // Prevent sync for demo or guest accounts
+  if (studentId && (studentId.startsWith('demo_') || studentId.startsWith('guest_') || studentId.includes('aspirant'))) {
     return;
   }
   try {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!session || !session.user) return;
+
+    const verifiedUserId = session.user.id;
+    if (studentId && studentId !== verifiedUserId) {
+      console.warn('syncTaskToSupabase: caller studentId does not match verified session');
+      return;
+    }
 
     const { error } = await supabase.from('study_tasks').upsert({
       id: task.id,
-      student_id: studentId,
+      student_id: verifiedUserId,
       title: task.title,
       subject_id: task.subjectId,
       status: task.completed ? 'completed' : 'pending',
@@ -234,19 +240,25 @@ export async function syncTaskToSupabase(task: Task, studentId: string) {
 /**
  * Delete a task from Supabase study_tasks table
  */
-export async function deleteTaskFromSupabase(taskId: string, studentId: string) {
-  if (!studentId || studentId.startsWith('demo_') || studentId.startsWith('guest_') || studentId.includes('aspirant')) {
+export async function deleteTaskFromSupabase(taskId: string, studentId?: string) {
+  if (studentId && (studentId.startsWith('demo_') || studentId.startsWith('guest_') || studentId.includes('aspirant'))) {
     return;
   }
   try {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!session || !session.user) return;
+
+    const verifiedUserId = session.user.id;
+    if (studentId && studentId !== verifiedUserId) {
+      console.warn('deleteTaskFromSupabase: caller studentId does not match verified session');
+      return;
+    }
 
     const { error } = await supabase
       .from('study_tasks')
       .delete()
       .eq('id', taskId)
-      .eq('student_id', studentId);
+      .eq('student_id', verifiedUserId);
     if (error) {
       console.warn('Supabase deleteTask notice:', error.message);
     }
@@ -256,14 +268,23 @@ export async function deleteTaskFromSupabase(taskId: string, studentId: string) 
 }
 
 /**
- * Load tasks for a user from Supabase study_tasks table
+ * Load tasks for a user from Supabase study_tasks table, derived strictly from active session
  */
-export async function loadTasksFromSupabase(studentId: string): Promise<Task[]> {
+export async function loadTasksFromSupabase(studentId?: string): Promise<Task[]> {
   try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session || !session.user) return [];
+
+    const verifiedUserId = session.user.id;
+    if (studentId && studentId !== verifiedUserId) {
+      console.warn('loadTasksFromSupabase: caller studentId does not match verified session');
+      return [];
+    }
+
     const { data, error } = await supabase
       .from('study_tasks')
       .select('*')
-      .eq('student_id', studentId);
+      .eq('student_id', verifiedUserId);
 
     if (error || !data) return [];
 

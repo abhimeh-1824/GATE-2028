@@ -8,7 +8,7 @@ import {
   SubjectId,
   TopicStatus,
 } from '../types';
-import { INITIAL_SUBJECTS } from '../data/gateDaSyllabus';
+import { createFreshZeroSubjects } from '../data/gateDaSyllabus';
 import { supabase } from './supabase';
 import { getSavedAccounts, getDeterministicUuid } from './supabaseService';
 
@@ -88,9 +88,12 @@ export function computeUserProgressProfile(
       ? Math.round(mockScores.reduce((a, b) => a + b, 0) / mockScores.length)
       : 0;
 
+  // Protect peer email privacy: only expose email to the user himself
+  const safeEmail = isCurrentUser ? user.email : '';
+
   return {
     id: user.id,
-    email: user.email,
+    email: safeEmail,
     fullName: user.fullName || settings?.userName || 'GATE DA Aspirant',
     avatarUrl: user.avatarUrl,
     targetAir: user.targetAir || settings?.targetAir || 1,
@@ -122,7 +125,19 @@ export async function syncUserProfileAndProgressToDatabase(
   mockTests: MockTest[],
   settings: UserSettings
 ): Promise<{ success: boolean; message: string }> {
+  // Prevent sync for demo or guest accounts
+  if (!user?.id || user.id.startsWith('demo_') || user.id.startsWith('guest_') || user.id.includes('aspirant')) {
+    return { success: false, message: 'Demo mode active. Cloud synchronization is disabled.' };
+  }
+
   try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session || !session.user || session.user.id !== user.id) {
+      return { success: false, message: 'Active Supabase session required for cloud progress synchronization.' };
+    }
+
+    const errors: string[] = [];
+
     // 1. Upsert profile in Supabase profiles table
     const { error: profileErr } = await supabase.from('profiles').upsert(
       {
@@ -135,7 +150,7 @@ export async function syncUserProfileAndProgressToDatabase(
     );
 
     if (profileErr) {
-      console.warn('Supabase profiles sync notice:', profileErr.message);
+      errors.push(`Profile: ${profileErr.message}`);
     }
 
     // 2. Upsert subject progress for each subject in subject_progress table
@@ -156,19 +171,30 @@ export async function syncUserProfileAndProgressToDatabase(
       }
     }
 
-    // 3. Sync mock tests to tests table
+    // 3. Sync mock tests to tests table with explicit student_id ownership
     if (mockTests.length > 0) {
       const dbTests = mockTests.map((m) => ({
-        id: getDeterministicUuid(`test_${m.id}`),
+        id: getDeterministicUuid(`test_${user.id}_${m.id}`),
+        student_id: user.id,
         title: m.title,
         created_at: m.date || new Date().toISOString(),
       }));
-      await supabase.from('tests').upsert(dbTests, { onConflict: 'id' });
+      const { error: testErr } = await supabase.from('tests').upsert(dbTests, { onConflict: 'id' });
+      if (testErr) {
+        errors.push(`Tests: ${testErr.message}`);
+      }
+    }
+
+    if (errors.length > 0) {
+      return {
+        success: false,
+        message: `Sync partially failed: ${errors.join(', ')}`,
+      };
     }
 
     return {
       success: true,
-      message: `Synchronized profile and ${progressUpserted}/${subjects.length} subject records with Supabase database.`,
+      message: `Synchronized profile, ${progressUpserted}/${subjects.length} subject records, and ${mockTests.length} tests.`,
     };
   } catch (err: any) {
     console.warn('syncUserProfileAndProgressToDatabase exception:', err);
@@ -182,12 +208,6 @@ export async function syncUserProfileAndProgressToDatabase(
 /**
  * Fetches ALL REAL users and their progress directly from the Supabase database.
  * No hardcoding or synthetic users allowed!
- *
- * Reads:
- * 1. Supabase `profiles` table
- * 2. Supabase `subject_progress` table
- * 3. Registered user accounts in the application
- * 4. Current logged-in user live state
  */
 export async function getAllPeerProfilesFromDatabase(
   currentUser: AuthUser | null,
@@ -205,7 +225,7 @@ export async function getAllPeerProfilesFromDatabase(
   let dbConnected = false;
   let dbMessage = 'Connected to Supabase';
 
-  // 1. Current user (active user or generic fallback)
+  // 1. Current user (active user or local state)
   const activeUser: AuthUser = currentUser || {
     id: 'demo_aspirant_gate_da_2028',
     email: 'demo.aspirant@gate-da.example.com',
@@ -228,8 +248,8 @@ export async function getAllPeerProfilesFromDatabase(
   // 2. Query Supabase database `profiles` and `subject_progress`
   try {
     const [profilesRes, progressRes] = await Promise.all([
-      supabase.from('profiles').select('*'),
-      supabase.from('subject_progress').select('*'),
+      supabase.from('profiles').select('id, full_name, created_at'),
+      supabase.from('subject_progress').select('student_id, subject_id, updated_at'),
     ]);
 
     if (!profilesRes.error) {
@@ -240,13 +260,14 @@ export async function getAllPeerProfilesFromDatabase(
       for (const remote of remoteProfiles) {
         if (!remote.id || remote.id === activeUser.id) continue;
 
-        // Find their stored user progress if registered locally, or construct from DB
+        // Find their stored user progress if registered locally, or construct clean baseline from DB
         const savedSubjectsRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_subjects`);
         const savedHoursRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_baseHours`);
         const savedMocksRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_mockTests`);
         const savedSettingsRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_settings`);
 
-        const pSubjects: Subject[] = savedSubjectsRaw ? JSON.parse(savedSubjectsRaw) : INITIAL_SUBJECTS;
+        // Do NOT fabricate demo defaults (INITIAL_SUBJECTS with 412h) - use clean zero subjects if no local progress
+        const pSubjects: Subject[] = savedSubjectsRaw ? JSON.parse(savedSubjectsRaw) : createFreshZeroSubjects();
         const pHours: number = savedHoursRaw ? Number(savedHoursRaw) : 0;
         const pMocks: MockTest[] = savedMocksRaw ? JSON.parse(savedMocksRaw) : [];
         const pSettings: UserSettings = savedSettingsRaw
@@ -264,7 +285,7 @@ export async function getAllPeerProfilesFromDatabase(
 
         const remoteUser: AuthUser = {
           id: remote.id,
-          email: `${remote.full_name?.toLowerCase().replace(/\s+/g, '.') || 'aspirant'}@gateda.edu`,
+          email: '', // Never expose peer email
           fullName: remote.full_name || 'GATE Aspirant',
           targetAir: pSettings.targetAir,
           targetCollege: pSettings.targetCollege,
@@ -293,7 +314,7 @@ export async function getAllPeerProfilesFromDatabase(
   try {
     const localAccounts = getSavedAccounts();
     for (const acc of localAccounts) {
-      if (acc.id === activeUser.id || acc.email.toLowerCase() === activeUser.email.toLowerCase()) {
+      if (acc.id === activeUser.id || (acc.email && activeUser.email && acc.email.toLowerCase() === activeUser.email.toLowerCase())) {
         continue;
       }
       if (profilesMap.has(acc.id)) continue;
@@ -303,7 +324,7 @@ export async function getAllPeerProfilesFromDatabase(
       const savedMocksRaw = localStorage.getItem(`${USER_DATA_PREFIX}${acc.id}_mockTests`);
       const savedSettingsRaw = localStorage.getItem(`${USER_DATA_PREFIX}${acc.id}_settings`);
 
-      const pSubjects: Subject[] = savedSubjectsRaw ? JSON.parse(savedSubjectsRaw) : INITIAL_SUBJECTS;
+      const pSubjects: Subject[] = savedSubjectsRaw ? JSON.parse(savedSubjectsRaw) : createFreshZeroSubjects();
       const pHours: number = savedHoursRaw ? Number(savedHoursRaw) : 0;
       const pMocks: MockTest[] = savedMocksRaw ? JSON.parse(savedMocksRaw) : [];
       const pSettings: UserSettings = savedSettingsRaw
@@ -319,8 +340,13 @@ export async function getAllPeerProfilesFromDatabase(
             userName: acc.fullName,
           };
 
+      const peerUser: AuthUser = {
+        ...acc,
+        email: '', // Never expose peer email
+      };
+
       const peerProf = computeUserProgressProfile(
-        acc,
+        peerUser,
         pSubjects,
         pHours,
         pMocks,
