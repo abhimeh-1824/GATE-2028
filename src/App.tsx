@@ -33,6 +33,7 @@ const MainAppContent: React.FC = () => {
   } = useStudy();
 
   const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('login');
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isOmniboxOpen, setIsOmniboxOpen] = useState(false);
   const [isFormulaVaultOpen, setIsFormulaVaultOpen] = useState(false);
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false);
@@ -107,7 +108,7 @@ const MainAppContent: React.FC = () => {
   // GATE 2: Authenticated User Portal Workspace
   return (
     <div className="flex h-screen overflow-hidden bg-[#faf8ff] text-slate-900 font-sans">
-      {/* Pinned Desktop Sidebar (240px fixed) */}
+      {/* Pinned Desktop Sidebar & Mobile Slide-Over Drawer */}
       <Sidebar
         onOpenFormulaVault={() => {
           setSelectedFormulaId(null);
@@ -116,6 +117,8 @@ const MainAppContent: React.FC = () => {
         onOpenSettingsModal={() => setIsSettingsOpen(true)}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
         onOpenTour={() => setIsTourOpen(true)}
+        isMobileOpen={isMobileNavOpen}
+        onCloseMobile={() => setIsMobileNavOpen(false)}
       />
 
       {/* Main Content Column */}
@@ -128,6 +131,7 @@ const MainAppContent: React.FC = () => {
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
           onOpenTour={() => setIsTourOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
+          onToggleMobileMenu={() => setIsMobileNavOpen(true)}
         />
 
         {/* Scrollable Viewport */}

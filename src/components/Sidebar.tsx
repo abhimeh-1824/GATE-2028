@@ -16,6 +16,7 @@ import {
   Users,
   Compass,
   HelpCircle,
+  X,
 } from 'lucide-react';
 import { useStudy } from '../context/StudyContext';
 import { soundManager } from '../utils/audio';
@@ -25,6 +26,8 @@ interface SidebarProps {
   onOpenSettingsModal: () => void;
   onOpenAuthModal: () => void;
   onOpenTour?: () => void;
+  isMobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -32,18 +35,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenSettingsModal,
   onOpenAuthModal,
   onOpenTour,
+  isMobileOpen,
+  onCloseMobile,
 }) => {
   const {
     activeView,
     setActiveView,
     tasks,
-    subjects,
     syllabusPercent,
     daysRemaining,
     settings,
     currentUser,
     allUsers,
-    logout,
     resetToDefaults,
   } = useStudy();
   const [soundEnabled, setSoundEnabled] = React.useState(soundManager.isEnabled());
@@ -119,22 +122,41 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
   ];
 
-  return (
-    <aside className="w-[240px] shrink-0 bg-white border-r border-slate-200 flex flex-col justify-between h-screen sticky top-0 select-none z-30">
+  const handleNavClick = (viewId: string) => {
+    setActiveView(viewId);
+    soundManager.playSubtleTick();
+    if (onCloseMobile) onCloseMobile();
+  };
+
+  const renderContent = (isMobile: boolean) => (
+    <>
       {/* Top Brand Header */}
       <div className="p-4 border-b border-slate-100">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-indigo-700 flex items-center justify-center text-white font-bold text-sm shadow-sm">
-            DA
+        <div className="flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-indigo-700 flex items-center justify-center text-white font-bold text-sm shadow-sm shrink-0">
+              DA
+            </div>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-sm font-bold text-slate-900 leading-tight tracking-tight truncate">
+                GATE DA 2028
+              </h1>
+              <p className="text-[11px] text-slate-500 font-medium truncate">
+                Academic Study Tracker
+              </p>
+            </div>
           </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="text-sm font-bold text-slate-900 leading-tight tracking-tight truncate">
-              GATE DA 2028
-            </h1>
-            <p className="text-[11px] text-slate-500 font-medium truncate">
-              Academic Study Tracker
-            </p>
-          </div>
+
+          {isMobile && onCloseMobile && (
+            <button
+              onClick={onCloseMobile}
+              className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+              title="Close Menu"
+              aria-label="Close Navigation"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* Days Countdown Kicker */}
@@ -149,7 +171,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Navigation Routes */}
       <nav className="flex-1 px-2.5 py-3 space-y-1 overflow-y-auto">
         <div className="px-2 pb-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-          Curriculum & Workflow
+          Curriculum &amp; Workflow
         </div>
 
         {navItems.map((item) => {
@@ -158,10 +180,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           return (
             <button
               key={item.id}
-              onClick={() => {
-                setActiveView(item.id);
-                soundManager.playSubtleTick();
-              }}
+              onClick={() => handleNavClick(item.id)}
               className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition-colors ${
                 isActive
                   ? 'bg-indigo-50 text-indigo-900 font-semibold'
@@ -196,23 +215,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <button
-          onClick={onOpenFormulaVault}
+          onClick={() => {
+            onOpenFormulaVault();
+            if (isMobile && onCloseMobile) onCloseMobile();
+          }}
           className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors"
         >
           <BookMarked className="w-4 h-4 text-slate-400" />
-          <span>Formula & Traps Vault</span>
+          <span>Formula &amp; Traps Vault</span>
         </button>
 
         <button
-          onClick={onOpenSettingsModal}
+          onClick={() => {
+            onOpenSettingsModal();
+            if (isMobile && onCloseMobile) onCloseMobile();
+          }}
           className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors"
         >
           <Award className="w-4 h-4 text-slate-400" />
-          <span>AIR Goals & Config</span>
+          <span>AIR Goals &amp; Config</span>
         </button>
 
         <button
-          onClick={onOpenAuthModal}
+          onClick={() => {
+            onOpenAuthModal();
+            if (isMobile && onCloseMobile) onCloseMobile();
+          }}
           className="w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium text-indigo-700 hover:bg-indigo-50 transition-colors"
         >
           <div className="flex items-center gap-2.5 truncate">
@@ -226,7 +254,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {onOpenTour && (
           <button
-            onClick={onOpenTour}
+            onClick={() => {
+              onOpenTour();
+              if (isMobile && onCloseMobile) onCloseMobile();
+            }}
             className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs font-semibold text-purple-700 bg-purple-50/60 hover:bg-purple-100/70 border border-purple-200/60 transition-colors"
           >
             <HelpCircle className="w-4 h-4 text-purple-600" />
@@ -260,7 +291,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* User Card & Controls */}
         <div className="flex items-center justify-between pt-0.5">
           <div
-            onClick={onOpenAuthModal}
+            onClick={() => {
+              onOpenAuthModal();
+              if (isMobile && onCloseMobile) onCloseMobile();
+            }}
             className="flex items-center gap-2 min-w-0 cursor-pointer group flex-1"
             title="Click to Switch User or Manage Accounts"
           >
@@ -289,6 +323,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClick={() => {
                 if (window.confirm('Reset all progress and tasks to clean starting state (0%)?')) {
                   resetToDefaults();
+                  if (isMobile && onCloseMobile) onCloseMobile();
                 }
               }}
               title="Reset to 0% Clean Slate"
@@ -299,6 +334,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* Desktop Sticky Sidebar */}
+      <aside className="hidden md:flex w-[240px] shrink-0 bg-white border-r border-slate-200 flex-col justify-between h-screen sticky top-0 select-none z-30">
+        {renderContent(false)}
+      </aside>
+
+      {/* Mobile Slide-Over Drawer */}
+      {isMobileOpen && (
+        <div className="fixed inset-0 z-50 md:hidden flex">
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity animate-in fade-in"
+            onClick={onCloseMobile}
+          />
+          <aside className="relative w-[280px] max-w-[85vw] bg-white h-full flex flex-col justify-between shadow-2xl z-10 animate-in slide-in-from-left duration-200">
+            {renderContent(true)}
+          </aside>
+        </div>
+      )}
+    </>
   );
 };

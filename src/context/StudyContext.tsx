@@ -23,6 +23,7 @@ import {
   createFreshZeroSubjects,
 } from '../data/gateDaSyllabus';
 import { soundManager } from '../utils/audio';
+import { supabase } from '../lib/supabase';
 import {
   signUpUser,
   signInUser,
@@ -315,7 +316,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [subjects]);
 
-  // Initial DB check on mount
+  // Initial DB check & Supabase auth listener on mount
   useEffect(() => {
     fetchSyllabusFromDatabase(initialData.subjects).then((res) => {
       setDbStats(res.stats);
@@ -326,6 +327,17 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }).catch((err) => {
       console.warn('Initial fetchSyllabusFromDatabase notice:', err);
     });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setCurrentUser(null);
+        setActiveUserId(null);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const [activeView, setActiveView] = useState<string>('Dashboard');

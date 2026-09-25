@@ -14,6 +14,7 @@ import {
   ChevronDown,
   User,
   Sparkles,
+  Menu,
 } from 'lucide-react';
 import { useStudy } from '../context/StudyContext';
 
@@ -24,6 +25,7 @@ interface TopBarProps {
   onOpenAuthModal?: () => void;
   onOpenTour?: () => void;
   onOpenSettings?: () => void;
+  onToggleMobileMenu?: () => void;
 }
 
 const ACADEMIC_MOTTOS = [
@@ -41,6 +43,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenAuthModal,
   onOpenTour,
   onOpenSettings,
+  onToggleMobileMenu,
 }) => {
   const {
     activeView,
@@ -99,8 +102,18 @@ export const TopBar: React.FC<TopBarProps> = ({
 
   return (
     <header className="h-14 border-b border-slate-200 bg-white/95 backdrop-blur-xs px-3 sm:px-6 flex items-center justify-between gap-3 sticky top-0 z-30 shadow-2xs">
-      {/* Left: Today's Date & Academic Motto */}
-      <div className="flex items-center gap-3 min-w-0">
+      {/* Left: Mobile Drawer Trigger + Today's Date & Academic Motto */}
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        {onToggleMobileMenu && (
+          <button
+            onClick={onToggleMobileMenu}
+            className="md:hidden p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors shrink-0"
+            title="Open Navigation Menu"
+            aria-label="Open Navigation Menu"
+          >
+            <Menu className="w-4 h-4" />
+          </button>
+        )}
         <div className="flex items-center gap-1.5 shrink-0">
           <span className="font-mono text-xs font-semibold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-md">
             {todayFormatted}
