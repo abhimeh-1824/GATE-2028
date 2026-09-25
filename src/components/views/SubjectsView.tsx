@@ -130,58 +130,38 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Real Supabase Database Sync Status & Operations Bar */}
-      <section className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs">
+      {/* Official Syllabus Overview Banner */}
+      <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-700 shrink-0">
-              <Database className="w-5 h-5" />
+          <div className="flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-700 shrink-0">
+              <BookOpen className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-900">
-                  Supabase Cloud Database
-                </span>
-                <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  Active
+                <h1 className="text-sm font-bold text-slate-900">
+                  Official GATE DA 2028 Curriculum Tree
+                </h1>
+                <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-semibold">
+                  IISc / IIT Canonical
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                Tables: <strong className="text-slate-700">subjects</strong> ({dbStats.subjectsCount}) · <strong className="text-slate-700">topics</strong> ({dbStats.topicsCount}) · <strong className="text-slate-700">subtopics</strong> ({dbStats.subtopicsCount})
+                8 Comprehensive Modules · 85 Exam Micro-Topics · Active Confidence &amp; Spaced Revision Tracking
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => syncSyllabusToDb()}
-              disabled={isSyncingDb}
-              title="Save all subjects, topics, and subtopics to Supabase database"
-              className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
+              onClick={onOpenFormulaVault}
+              className="px-3.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              <UploadCloud className={`w-3.5 h-3.5 ${isSyncingDb ? 'animate-bounce' : ''}`} />
-              <span>Save to Database</span>
-            </button>
-
-            <button
-              onClick={() => fetchSyllabusFromDb()}
-              disabled={isSyncingDb}
-              title="Query and fetch real records directly from Supabase database"
-              className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDb ? 'animate-spin' : ''}`} />
-              <span>Fetch Real Data from DB</span>
+              <Sigma className="w-3.5 h-3.5" />
+              <span>KaTeX Formula Vault</span>
             </button>
           </div>
         </div>
-
-        {dbSyncMessage && (
-          <div className="mt-3 pt-3 border-t border-slate-100 text-[11px] font-mono text-slate-600 flex items-center gap-2">
-            <Server className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-            <span className="truncate">{dbSyncMessage}</span>
-          </div>
-        )}
       </section>
 
       {/* 9 Subjects Horizontal Selector Bar */}

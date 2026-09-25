@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   LogIn,
@@ -13,10 +13,13 @@ import {
   AlertCircle,
   Sparkles,
   ArrowRight,
-  Database
+  Database,
+  KeyRound,
+  RotateCcw
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
 import { AuthUser } from '../../types';
+import { supabase } from '../../lib/supabase';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -31,13 +34,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 }) => {
   const { currentUser, allUsers, login, register, switchUser, logout, loginAsDemo } = useStudy();
 
-  const [activeTab, setActiveTab] = useState<'login' | 'register' | 'switch'>(defaultTab);
+  const [activeTab, setActiveTab] = useState<'login' | 'register' | 'switch' | 'forgot'>(defaultTab);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (isOpen) {
       setActiveTab(defaultTab);
+      setErrorMessage(null);
+      setSuccessNotice(null);
     }
   }, [defaultTab, isOpen]);
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   // Form states
   const [email, setEmail] = useState('');
@@ -52,6 +69,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
   if (!isOpen) return null;
+
+  const sanitizeError = (err: string) => {
+    const lower = err.toLowerCase();
+    if (lower.includes('rate limit') || lower.includes('429') || lower.includes('too many requests')) {
+      return 'Rate limit exceeded on authentication requests. Please wait a moment or click "Instant Demo Access" below.';
+    }
+    if (lower.includes('invalid login credentials') || lower.includes('invalid credentials')) {
+      return 'Incorrect email or password. Please verify your details.';
+    }
+    if (lower.includes('user already registered')) {
+      return 'An account with this email already exists. Please sign in instead.';
+    }
+    return err;
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,9 +100,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setTimeout(() => {
         onClose();
         setSuccessNotice(null);
-      }, 1000);
+      }, 800);
     } else {
-      setErrorMessage(res.error || 'Invalid credentials or login failed.');
+      setErrorMessage(sanitizeError(res.error || 'Invalid credentials or login failed.'));
     }
   };
 
@@ -80,7 +111,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     if (!email.trim() || !password || !fullName.trim()) return;
 
     if (password.length < 6) {
-      setErrorMessage('Password must be at least 6 characters.');
+      setErrorMessage('Password must be at least 6 characters long.');
       return;
     }
 
@@ -92,44 +123,77 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       email.trim(),
       password,
       fullName.trim(),
-      Number(targetAir) || 1,
-      targetCollege.trim() || 'IISc Bangalore (M.Tech AI)'
+      targetAir,
+      targetCollege
     );
     setIsLoading(false);
 
     if (res.success) {
       if (res.needsEmailConfirmation) {
         setSuccessNotice(
-          'Account created! A confirmation email has been sent. You can start studying right away.'
+          'Account created! Confirmation email sent. You can start studying immediately; verify your email at your convenience.'
         );
       } else {
-        setSuccessNotice('Account created successfully! Starting your campaign from 0%.');
+        setSuccessNotice('Account created successfully! Initializing workspace with clean zero metrics.');
       }
       setTimeout(() => {
         onClose();
         setSuccessNotice(null);
-      }, 1500);
+      }, 1200);
     } else {
-      setErrorMessage(res.error || 'Registration failed.');
+      setErrorMessage(sanitizeError(res.error || 'Registration failed.'));
     }
   };
 
-  const handleQuickSwitch = (u: AuthUser) => {
-    switchUser(u.id);
-    onClose();
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim()) {
+      setErrorMessage('Please enter your email address to receive password reset instructions.');
+      return;
+    }
+    setIsLoading(true);
+    setErrorMessage(null);
+    setSuccessNotice(null);
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+      setIsLoading(false);
+      if (error) {
+        setErrorMessage(sanitizeError(error.message));
+      } else {
+        setSuccessNotice(`Password reset instructions sent to ${email.trim()}. Check your inbox.`);
+      }
+    } catch (err: any) {
+      setIsLoading(false);
+      setErrorMessage(sanitizeError(err?.message || 'Failed to send password reset request.'));
+    }
+  };
+
+  const handleQuickSwitch = (targetUser: AuthUser) => {
+    switchUser(targetUser.id);
+    setSuccessNotice(`Switched active profile to ${targetUser.fullName}`);
+    setTimeout(() => {
+      onClose();
+      setSuccessNotice(null);
+    }, 600);
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
-        {/* Modal Header */}
-        <div className="p-4 bg-[#faf8ff] border-b border-slate-100 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-indigo-700 text-white flex items-center justify-center shadow-xs">
-              <Database className="w-4 h-4" />
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="auth-modal-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-200"
+    >
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden flex flex-col max-h-[92vh]">
+        {/* Header */}
+        <div className="p-5 pb-4 border-b border-slate-100 flex items-center justify-between bg-linear-to-r from-slate-50 via-white to-indigo-50/30">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-700 flex items-center justify-center text-white font-extrabold text-sm shadow-xs">
+              DA
             </div>
             <div>
-              <h2 className="text-sm font-bold text-slate-900 leading-tight">
+              <h2 id="auth-modal-title" className="text-sm font-bold text-slate-900 leading-tight">
                 GATE DA Aspirant Portal
               </h2>
               <div className="text-[10px] text-slate-500 flex items-center gap-1 font-mono">
@@ -140,6 +204,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
           <button
             onClick={onClose}
+            aria-label="Close authentication modal"
             className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
           >
             <X className="w-4 h-4" />
@@ -175,7 +240,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             }`}
           >
             <UserPlus className="w-3.5 h-3.5" />
-            <span>Register (Start from 0)</span>
+            <span>Register (Clean 0%)</span>
           </button>
 
           {allUsers.length > 0 && (
@@ -191,7 +256,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               }`}
             >
               <Users className="w-3.5 h-3.5" />
-              <span>Switch User ({allUsers.length})</span>
+              <span>Switch ({allUsers.length})</span>
+            </button>
+          )}
+
+          {activeTab === 'forgot' && (
+            <button
+              className="pb-2.5 px-3 text-xs font-semibold border-b-2 border-indigo-700 text-indigo-700 flex items-center gap-1.5"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>Reset Password</span>
             </button>
           )}
         </div>
@@ -215,28 +289,43 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {activeTab === 'login' && (
           <form onSubmit={handleLogin} className="p-5 space-y-3.5">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label htmlFor="login-email-input" className="block text-xs font-semibold text-slate-700 mb-1">
                 Email Address
               </label>
               <div className="relative">
                 <input
+                  id="login-email-input"
                   type="email"
                   required
-                  placeholder="aspirant@iisc.ac.in"
+                  placeholder="name@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg focus:border-indigo-600 outline-hidden"
+                  className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg focus:border-indigo-600 outline-hidden font-mono"
                 />
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Password
-              </label>
+              <div className="flex justify-between items-center mb-1">
+                <label htmlFor="login-password-input" className="block text-xs font-semibold text-slate-700">
+                  Password
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('forgot');
+                    setErrorMessage(null);
+                    setSuccessNotice(null);
+                  }}
+                  className="text-[11px] text-indigo-600 hover:text-indigo-800 hover:underline"
+                >
+                  Forgot password?
+                </button>
+              </div>
               <div className="relative">
                 <input
+                  id="login-password-input"
                   type="password"
                   required
                   placeholder="••••••••"
@@ -252,7 +341,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-2.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-xs font-bold shadow-xs transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full py-2.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-xs font-bold shadow-xs transition-colors disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
               >
                 {isLoading ? (
                   <span>Authenticating...</span>
@@ -270,7 +359,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   loginAsDemo();
                   onClose();
                 }}
-                className="w-full py-2 border border-purple-200 bg-purple-50/70 hover:bg-purple-100 text-purple-800 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+                className="w-full py-2 border border-purple-200 bg-purple-50/70 hover:bg-purple-100 text-purple-800 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5 text-purple-600" />
                 <span>Instant Demo Access (No Password Required)</span>
@@ -292,17 +381,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Tab 2: Register Form */}
         {activeTab === 'register' && (
-          <form onSubmit={handleRegister} className="p-5 space-y-3">
+          <form onSubmit={handleRegister} className="p-5 space-y-3 overflow-y-auto">
             <div className="p-2.5 bg-indigo-50/70 border border-indigo-100 rounded-lg text-[11px] text-indigo-900 leading-snug">
-              <strong>Clean Slate Architecture:</strong> Every new user starts with <strong>0%</strong> syllabus coverage, <strong>0 hours</strong> logged, and empty tasks. Your progress will be saved under your distinct account.
+              <strong>Clean Slate Architecture:</strong> Every new user starts with <strong>0%</strong> syllabus coverage, <strong>0 hours</strong> logged, and empty tasks under your distinct account.
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label htmlFor="reg-fullname-input" className="block text-xs font-semibold text-slate-700 mb-1">
                 Full Name *
               </label>
               <div className="relative">
                 <input
+                  id="reg-fullname-input"
                   type="text"
                   required
                   placeholder="e.g. Rahul Sharma"
@@ -315,32 +405,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label htmlFor="reg-email-input" className="block text-xs font-semibold text-slate-700 mb-1">
                 Email Address *
               </label>
               <div className="relative">
                 <input
+                  id="reg-email-input"
                   type="email"
                   required
-                  placeholder="e.g. abhishek@gmail.com"
+                  placeholder="aspirant@gmail.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-9 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:border-indigo-600 outline-hidden"
+                  className="w-full pl-9 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:border-indigo-600 outline-hidden font-mono"
                 />
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Password (min 6 characters) *
+              <label htmlFor="reg-password-input" className="block text-xs font-semibold text-slate-700 mb-1">
+                Password * (min 6 characters)
               </label>
               <div className="relative">
                 <input
+                  id="reg-password-input"
                   type="password"
                   required
                   minLength={6}
-                  placeholder="••••••••"
+                  placeholder="Create a secure password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full pl-9 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:border-indigo-600 outline-hidden font-mono"
@@ -349,35 +441,39 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-2 gap-3 pt-1">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Target AIR Rank
+                <label htmlFor="reg-targetair-input" className="block text-xs font-semibold text-slate-700 mb-1">
+                  Target AIR
                 </label>
                 <div className="relative">
                   <input
+                    id="reg-targetair-input"
                     type="number"
-                    min="1"
-                    max="1000"
+                    min={1}
+                    max={1000}
                     value={targetAir}
-                    onChange={(e) => setTargetAir(Number(e.target.value))}
-                    className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:border-indigo-600 outline-hidden font-mono"
+                    onChange={(e) => setTargetAir(parseInt(e.target.value) || 1)}
+                    className="w-full pl-8 pr-2 py-1.5 text-xs border border-slate-300 rounded-lg focus:border-indigo-600 outline-hidden font-mono"
                   />
-                  <Target className="w-3.5 h-3.5 text-indigo-600 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <Target className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Dream Program
+                <label htmlFor="reg-targetcollege-input" className="block text-xs font-semibold text-slate-700 mb-1">
+                  Target Destination
                 </label>
-                <input
-                  type="text"
-                  value={targetCollege}
-                  onChange={(e) => setTargetCollege(e.target.value)}
-                  placeholder="IISc M.Tech AI"
-                  className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg focus:border-indigo-600 outline-hidden truncate"
-                />
+                <div className="relative">
+                  <input
+                    id="reg-targetcollege-input"
+                    type="text"
+                    value={targetCollege}
+                    onChange={(e) => setTargetCollege(e.target.value)}
+                    className="w-full pl-8 pr-2 py-1.5 text-xs border border-slate-300 rounded-lg focus:border-indigo-600 outline-hidden truncate"
+                  />
+                  <Award className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                </div>
               </div>
             </div>
 
@@ -385,22 +481,89 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-2.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-xs font-bold shadow-xs transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full py-2.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-xs font-bold shadow-xs transition-colors disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
               >
                 {isLoading ? (
                   <span>Registering...</span>
                 ) : (
                   <>
                     <UserPlus className="w-4 h-4" />
-                    <span>Create Account & Start at 0%</span>
+                    <span>Create My Study Workspace (0%)</span>
                   </>
                 )}
+              </button>
+            </div>
+
+            <p className="text-center text-[11px] text-slate-500 pt-1">
+              Already have an account?{' '}
+              <button
+                type="button"
+                onClick={() => setActiveTab('login')}
+                className="text-indigo-700 font-semibold hover:underline"
+              >
+                Sign In
+              </button>
+            </p>
+          </form>
+        )}
+
+        {/* Tab 3: Forgot Password / Reset */}
+        {activeTab === 'forgot' && (
+          <form onSubmit={handleResetPassword} className="p-5 space-y-3.5">
+            <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-lg text-xs text-amber-900 leading-snug">
+              Enter your registered email address to receive password reset instructions.
+            </div>
+
+            <div>
+              <label htmlFor="forgot-email-input" className="block text-xs font-semibold text-slate-700 mb-1">
+                Registered Email Address
+              </label>
+              <div className="relative">
+                <input
+                  id="forgot-email-input"
+                  type="email"
+                  required
+                  placeholder="name@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg focus:border-indigo-600 outline-hidden font-mono"
+                />
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              </div>
+            </div>
+
+            <div className="pt-2 flex flex-col gap-2">
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-2.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-xs font-bold shadow-xs transition-colors disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {isLoading ? (
+                  <span>Sending reset link...</span>
+                ) : (
+                  <>
+                    <KeyRound className="w-4 h-4" />
+                    <span>Send Password Reset Instructions</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('login');
+                  setErrorMessage(null);
+                  setSuccessNotice(null);
+                }}
+                className="w-full py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <span>Back to Sign In</span>
               </button>
             </div>
           </form>
         )}
 
-        {/* Tab 3: Multiple Users Switcher */}
+        {/* Tab 4: Multiple Users Switcher */}
         {activeTab === 'switch' && (
           <div className="p-5 space-y-3">
             <p className="text-xs text-slate-600">
@@ -412,10 +575,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 const isCurrent = currentUser?.id === u.id;
 
                 return (
-                  <div
+                  <button
                     key={u.id}
+                    type="button"
                     onClick={() => handleQuickSwitch(u)}
-                    className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                    aria-label={`Switch to user ${u.fullName}`}
+                    className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
                       isCurrent
                         ? 'bg-indigo-50/60 border-indigo-400 ring-1 ring-indigo-200'
                         : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
@@ -445,7 +610,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         </div>
                       )}
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -459,7 +624,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     logout();
                     onClose();
                   }}
-                  className="text-xs font-semibold text-rose-600 hover:text-rose-700"
+                  className="text-xs font-semibold text-rose-600 hover:text-rose-700 cursor-pointer"
                 >
                   Sign Out
                 </button>

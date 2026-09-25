@@ -111,11 +111,17 @@ interface StudyContextType {
   // Actions
   toggleTaskCompletion: (taskId: string) => void;
   addTask: (task: Omit<Task, 'id'>) => void;
+  updateTask: (taskId: string, updates: Partial<Task>) => void;
   deleteTask: (taskId: string) => void;
   updateTopicStatus: (subjectId: SubjectId, topicId: string, status: TopicStatus) => void;
   updateTopicConfidence: (subjectId: SubjectId, topicId: string, confidence: number) => void;
   addMockTest: (mock: Omit<MockTest, 'id'>) => void;
+  updateMockTest: (mockId: string, updates: Partial<MockTest>) => void;
+  deleteMockTest: (mockId: string) => void;
   addCalendarEvent: (event: Omit<CalendarEvent, 'id'>) => void;
+  updateCalendarEvent: (eventId: string, updates: Partial<CalendarEvent>) => void;
+  deleteCalendarEvent: (eventId: string) => void;
+  toggleCalendarEventCompletion: (eventId: string) => void;
   addStudySessionHours: (minutes: number, subjectId?: SubjectId, topicTitle?: string) => void;
   updateSettings: (newSettings: Partial<UserSettings>) => void;
   resetToDefaults: () => void;
@@ -598,6 +604,22 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     soundManager.playSubtleTick();
   };
 
+  const updateTask = (taskId: string, updates: Partial<Task>) => {
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id === taskId) {
+          const updated = { ...t, ...updates };
+          if (currentUser?.id) {
+            syncTaskToSupabase(updated, currentUser.id);
+          }
+          return updated;
+        }
+        return t;
+      })
+    );
+    soundManager.playSubtleTick();
+  };
+
   const deleteTask = (taskId: string) => {
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
     if (currentUser?.id) {
@@ -650,12 +672,43 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     soundManager.playCompletionChime();
   };
 
+  const updateMockTest = (mockId: string, updates: Partial<MockTest>) => {
+    setMockTests((prev) =>
+      prev.map((m) => (m.id === mockId ? { ...m, ...updates } : m))
+    );
+    soundManager.playSubtleTick();
+  };
+
+  const deleteMockTest = (mockId: string) => {
+    setMockTests((prev) => prev.filter((m) => m.id !== mockId));
+    soundManager.playSubtleTick();
+  };
+
   const addCalendarEvent = (eventData: Omit<CalendarEvent, 'id'>) => {
     const newEvent: CalendarEvent = {
       ...eventData,
       id: `cal_${Date.now()}`,
     };
     setCalendarEvents((prev) => [newEvent, ...prev]);
+    soundManager.playSubtleTick();
+  };
+
+  const updateCalendarEvent = (eventId: string, updates: Partial<CalendarEvent>) => {
+    setCalendarEvents((prev) =>
+      prev.map((e) => (e.id === eventId ? { ...e, ...updates } : e))
+    );
+    soundManager.playSubtleTick();
+  };
+
+  const deleteCalendarEvent = (eventId: string) => {
+    setCalendarEvents((prev) => prev.filter((e) => e.id !== eventId));
+    soundManager.playSubtleTick();
+  };
+
+  const toggleCalendarEventCompletion = (eventId: string) => {
+    setCalendarEvents((prev) =>
+      prev.map((e) => (e.id === eventId ? { ...e, completed: !e.completed } : e))
+    );
     soundManager.playSubtleTick();
   };
 
@@ -940,11 +993,17 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         revisionDueCount,
         toggleTaskCompletion,
         addTask,
+        updateTask,
         deleteTask,
         updateTopicStatus,
         updateTopicConfidence,
         addMockTest,
+        updateMockTest,
+        deleteMockTest,
         addCalendarEvent,
+        updateCalendarEvent,
+        deleteCalendarEvent,
+        toggleCalendarEventCompletion,
         addStudySessionHours,
         updateSettings,
         resetToDefaults,

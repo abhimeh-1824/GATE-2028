@@ -205,7 +205,14 @@ export async function signOutUser(): Promise<void> {
  * Sync a task to Supabase study_tasks table
  */
 export async function syncTaskToSupabase(task: Task, studentId: string) {
+  // Prevent 401 RLS warnings for demo and guest accounts
+  if (!studentId || studentId.startsWith('demo_') || studentId.startsWith('guest_') || studentId.includes('aspirant')) {
+    return;
+  }
   try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
     const { error } = await supabase.from('study_tasks').upsert({
       id: task.id,
       student_id: studentId,
@@ -228,7 +235,13 @@ export async function syncTaskToSupabase(task: Task, studentId: string) {
  * Delete a task from Supabase study_tasks table
  */
 export async function deleteTaskFromSupabase(taskId: string, studentId: string) {
+  if (!studentId || studentId.startsWith('demo_') || studentId.startsWith('guest_') || studentId.includes('aspirant')) {
+    return;
+  }
   try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
     const { error } = await supabase
       .from('study_tasks')
       .delete()

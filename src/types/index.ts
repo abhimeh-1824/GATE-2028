@@ -130,6 +130,7 @@ export interface CalendarEvent {
   subjectId?: SubjectId;
   time?: string;
   duration?: string;
+  completed?: boolean;
 }
 
 export interface DbSubjectRow {

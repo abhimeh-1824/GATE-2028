@@ -5,7 +5,7 @@ import fs from "fs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
-const PORT = Number(process.env.PORT) || 3e3;
+const PORT = 3e3;
 app.use(express.json({ limit: "15mb" }));
 const appletSyncStorage = /* @__PURE__ */ new Map();
 const SYNC_CACHE_DIR = path.join(__dirname, ".sync_cache");
@@ -20,8 +20,15 @@ app.get(["/api/health", "/health", "/healthz"], (_req, res) => {
 });
 const LINKED_APPLET_ID = "2a25406d-a516-461a-aab7-208d3865f39c";
 app.post(["/api/sync/linked", `/api/sync/${LINKED_APPLET_ID}`, "/api/sync/:appletId"], (req, res) => {
-  const targetId = req.params.appletId || LINKED_APPLET_ID;
+  const rawId = req.params.appletId || LINKED_APPLET_ID;
+  const targetId = rawId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+  if (!targetId) {
+    return res.status(400).json({ success: false, error: "Invalid applet ID" });
+  }
   const payload = req.body;
+  if (!payload || typeof payload !== "object") {
+    return res.status(400).json({ success: false, error: "Invalid payload structure" });
+  }
   const updatedAt = (/* @__PURE__ */ new Date()).toISOString();
   appletSyncStorage.set(targetId, { payload, updatedAt });
   try {
@@ -38,7 +45,11 @@ app.post(["/api/sync/linked", `/api/sync/${LINKED_APPLET_ID}`, "/api/sync/:apple
   });
 });
 app.get(["/api/sync/linked", `/api/sync/${LINKED_APPLET_ID}`, "/api/sync/:appletId"], (req, res) => {
-  const targetId = req.params.appletId || LINKED_APPLET_ID;
+  const rawId = req.params.appletId || LINKED_APPLET_ID;
+  const targetId = rawId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+  if (!targetId) {
+    return res.status(400).json({ success: false, error: "Invalid applet ID" });
+  }
   let record = appletSyncStorage.get(targetId);
   if (!record) {
     try {

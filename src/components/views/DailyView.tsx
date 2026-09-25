@@ -14,10 +14,12 @@ import {
   Timer,
   BookOpen,
   Save,
-  Check
+  Check,
+  Edit3
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
-import { TaskType, SubjectId } from '../../types';
+import { TaskType, SubjectId, Task } from '../../types';
+import { AddTaskModal } from '../modals/AddTaskModal';
 
 interface DailyViewProps {
   onOpenAddTask: () => void;
@@ -27,6 +29,7 @@ export const DailyView: React.FC<DailyViewProps> = ({ onOpenAddTask }) => {
   const {
     tasks,
     subjects,
+    currentUser,
     toggleTaskCompletion,
     deleteTask,
     timerState,
@@ -38,29 +41,31 @@ export const DailyView: React.FC<DailyViewProps> = ({ onOpenAddTask }) => {
     addStudySessionHours,
   } = useStudy();
 
+  const userId = currentUser?.id || 'demo_user';
   const [filterType, setFilterType] = useState<string>('all');
   const [selectedDate, setSelectedDate] = useState<string>(() => {
     return new Date().toISOString().split('T')[0];
   });
+  const [taskToEdit, setTaskToEdit] = useState<Task | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
-  // Daily reflection notes
+  // Daily reflection notes - user scoped to prevent cross-account leakage
   const [dailyNotes, setDailyNotes] = useState<string>(() => {
-    return localStorage.getItem(`gate_notes_${selectedDate}`) || 
-      'Key realizations today:\n- Proved that projection matrix P is always idempotent (P²=P) and symmetric (P=Pᵀ).\n- Resolved doubt in Sheldon Ross regarding Poisson process superposition theorem.';
+    return localStorage.getItem(`gate_notes_${userId}_${selectedDate}`) || '';
   });
   const [notesSaved, setNotesSaved] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem(`gate_notes_${selectedDate}`);
+    const saved = localStorage.getItem(`gate_notes_${userId}_${selectedDate}`);
     if (saved !== null) {
       setDailyNotes(saved);
     } else {
       setDailyNotes('');
     }
-  }, [selectedDate]);
+  }, [selectedDate, userId]);
 
   const handleSaveNotes = () => {
-    localStorage.setItem(`gate_notes_${selectedDate}`, dailyNotes);
+    localStorage.setItem(`gate_notes_${userId}_${selectedDate}`, dailyNotes);
     setNotesSaved(true);
     setTimeout(() => setNotesSaved(false), 2000);
   };
@@ -404,8 +409,19 @@ export const DailyView: React.FC<DailyViewProps> = ({ onOpenAddTask }) => {
                       {task.durationMinutes}m
                     </span>
                     <button
+                      onClick={() => {
+                        setTaskToEdit(task);
+                        setIsEditModalOpen(true);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-1 rounded text-slate-400 hover:text-indigo-600 transition-all cursor-pointer"
+                      title="Edit Task"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
                       onClick={() => deleteTask(task.id)}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded text-slate-400 hover:text-rose-600 transition-all"
+                      className="opacity-0 group-hover:opacity-100 p-1 rounded text-slate-400 hover:text-rose-600 transition-all cursor-pointer"
+                      title="Delete Task"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -490,6 +506,16 @@ export const DailyView: React.FC<DailyViewProps> = ({ onOpenAddTask }) => {
           </div>
         </div>
       </section>
+
+      {/* Edit Task Modal */}
+      <AddTaskModal
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setTaskToEdit(null);
+        }}
+        taskToEdit={taskToEdit}
+      />
     </div>
   );
 };

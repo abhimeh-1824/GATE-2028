@@ -7,7 +7,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+// Nginx listens on Cloud Run's external port (8080) and proxies to http://localhost:3000.
+// Therefore, this Express app must always listen on port 3000.
+const PORT = 3000;
 
 app.use(express.json({ limit: '15mb' }));
 

@@ -1,15 +1,16 @@
-import React, { useState } from 'react';
-import { X, Plus, Calendar, Clock, BookOpen, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Plus, Calendar, Clock, BookOpen, AlertCircle, Edit3 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
-import { SubjectId, TaskType, PriorityLevel } from '../../types';
+import { SubjectId, TaskType, PriorityLevel, Task } from '../../types';
 
 interface AddTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
+  taskToEdit?: Task | null;
 }
 
-export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) => {
-  const { subjects, addTask } = useStudy();
+export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, taskToEdit }) => {
+  const { subjects, addTask, updateTask } = useStudy();
 
   const [title, setTitle] = useState('');
   const [subjectId, setSubjectId] = useState<SubjectId>('linear_algebra');
@@ -19,6 +20,46 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) =
   const [scheduledTime, setScheduledTime] = useState('09:00 AM');
   const [priority, setPriority] = useState<PriorityLevel>('high');
   const [notes, setNotes] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Initialize or prefill fields
+  useEffect(() => {
+    if (isOpen) {
+      if (taskToEdit) {
+        setTitle(taskToEdit.title);
+        setSubjectId(taskToEdit.subjectId);
+        setTopicTitle(taskToEdit.topicTitle);
+        setType(taskToEdit.type);
+        setDurationMinutes(taskToEdit.durationMinutes || 45);
+        setScheduledTime(taskToEdit.scheduledTime || '09:00 AM');
+        setPriority(taskToEdit.priority || 'high');
+        setNotes(taskToEdit.notes || '');
+      } else {
+        setTitle('');
+        setSubjectId('linear_algebra');
+        const laTopics = subjects.find((s) => s.id === 'linear_algebra')?.topics;
+        setTopicTitle(laTopics?.[0]?.title || 'Matrices & Vector Spaces');
+        setType('concept');
+        setDurationMinutes(45);
+        setScheduledTime('09:00 AM');
+        setPriority('high');
+        setNotes('');
+      }
+      setIsSubmitting(false);
+    }
+  }, [isOpen, taskToEdit, subjects]);
+
+  // Handle Escape key
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -27,41 +68,60 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) =
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return;
+    if (!title.trim() || isSubmitting) return;
 
-    addTask({
-      title: title.trim(),
-      subjectId,
-      topicTitle: topicTitle || (availableTopics[0]?.title || 'Core Topic'),
-      type,
-      durationMinutes: Number(durationMinutes) || 30,
-      completed: false,
-      date: new Date().toISOString().split('T')[0],
-      scheduledTime,
-      priority,
-      notes: notes.trim() || undefined,
-    });
+    setIsSubmitting(true);
+
+    if (taskToEdit) {
+      updateTask(taskToEdit.id, {
+        title: title.trim(),
+        subjectId,
+        topicTitle: topicTitle || (availableTopics[0]?.title || 'Core Topic'),
+        type,
+        durationMinutes: Number(durationMinutes) || 30,
+        scheduledTime,
+        priority,
+        notes: notes.trim() || undefined,
+      });
+    } else {
+      addTask({
+        title: title.trim(),
+        subjectId,
+        topicTitle: topicTitle || (availableTopics[0]?.title || 'Core Topic'),
+        type,
+        durationMinutes: Number(durationMinutes) || 30,
+        completed: false,
+        date: new Date().toISOString().split('T')[0],
+        scheduledTime,
+        priority,
+        notes: notes.trim() || undefined,
+      });
+    }
 
     onClose();
-    // Reset form
-    setTitle('');
-    setNotes('');
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+    >
       <div className="bg-white w-full max-w-lg rounded-xl shadow-2xl border border-slate-200 overflow-hidden">
         {/* Header */}
         <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-[#faf8ff]">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-indigo-700 text-white flex items-center justify-center">
-              <Plus className="w-4 h-4" />
+              {taskToEdit ? <Edit3 className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
             </div>
-            <h2 className="text-sm font-bold text-slate-900">Add Study Target / Task</h2>
+            <h2 className="text-sm font-bold text-slate-900">
+              {taskToEdit ? 'Edit Study Target / Task' : 'Add Study Target / Task'}
+            </h2>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+            aria-label="Close modal"
+            className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -150,8 +210,8 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) =
               </label>
               <input
                 type="number"
-                min="10"
-                max="240"
+                min="5"
+                max="360"
                 step="5"
                 value={durationMinutes}
                 onChange={(e) => setDurationMinutes(Number(e.target.value))}
@@ -177,7 +237,7 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) =
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Time Block (e.g. 07:00 AM)
+              Time Block (e.g. 07:00 AM or Evening Block)
             </label>
             <input
               type="text"
@@ -206,15 +266,16 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose }) =
             <button
               type="button"
               onClick={onClose}
-              className="px-3.5 py-2 text-xs font-medium text-slate-600 hover:text-slate-800 rounded-lg transition-colors"
+              className="px-3.5 py-2 text-xs font-medium text-slate-600 hover:text-slate-800 rounded-lg transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-xs font-semibold bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg shadow-xs transition-colors"
+              disabled={isSubmitting}
+              className="px-4 py-2 text-xs font-semibold bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg shadow-xs transition-colors cursor-pointer disabled:opacity-50"
             >
-              Add Target
+              {taskToEdit ? 'Save Changes' : 'Add Target'}
             </button>
           </div>
         </form>

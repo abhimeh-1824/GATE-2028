@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StudyResource } from '../../types';
+import { useStudy } from '../../context/StudyContext';
 import {
   X,
   BookOpen,
@@ -27,8 +28,49 @@ export const ResourceViewerModal: React.FC<ResourceViewerModalProps> = ({
   isOpen,
   onClose,
 }) => {
+  const { currentUser } = useStudy();
+  const userId = currentUser?.id || 'demo_user';
+
   const [copied, setCopied] = useState(false);
   const [personalNotes, setPersonalNotes] = useState('');
+  const [hasSaved, setHasSaved] = useState(false);
+
+  // Load existing notes for this resource & user
+  useEffect(() => {
+    if (resource?.id) {
+      try {
+        const saved = localStorage.getItem(`gate_resource_notes_${userId}_${resource.id}`);
+        setPersonalNotes(saved || '');
+      } catch {
+        setPersonalNotes('');
+      }
+    }
+  }, [resource?.id, userId]);
+
+  // Handle Escape key
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  const handleNotesChange = (text: string) => {
+    setPersonalNotes(text);
+    if (resource?.id) {
+      try {
+        localStorage.setItem(`gate_resource_notes_${userId}_${resource.id}`, text);
+        setHasSaved(true);
+        setTimeout(() => setHasSaved(false), 1500);
+      } catch (err) {
+        console.warn('Could not save note to localStorage', err);
+      }
+    }
+  };
 
   if (!isOpen || !resource) return null;
 
@@ -228,15 +270,15 @@ export const ResourceViewerModal: React.FC<ResourceViewerModalProps> = ({
                 <StickyNote className="w-3.5 h-3.5 text-amber-500" />
                 <span>Lecture Notes / Key Formulas From This Resource:</span>
               </label>
-              <span className="text-[10px] text-slate-400 font-mono">
-                Auto-saved in memory
+              <span className={`text-[10px] font-mono transition-colors ${hasSaved ? 'text-emerald-600 font-bold' : 'text-slate-400'}`}>
+                {hasSaved ? 'Saved locally ✓' : 'Auto-saved to your profile'}
               </span>
             </div>
             <textarea
               rows={3}
               value={personalNotes}
-              onChange={(e) => setPersonalNotes(e.target.value)}
-              placeholder="e.g. At 14:20 Strang proves dim(Col(A)) = dim(Row(A)). Remember to apply in mock test 3..."
+              onChange={(e) => handleNotesChange(e.target.value)}
+              placeholder="e.g. At 14:20 Strang proves dim(Col(A)) = dim(Row(A)). Key theorem for GATE DA questions..."
               className="w-full p-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-sans"
             />
           </div>
