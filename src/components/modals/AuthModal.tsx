@@ -20,6 +20,7 @@ import {
 import { useStudy } from '../../context/StudyContext';
 import { AuthUser } from '../../types';
 import { supabase } from '../../lib/supabase';
+import { getAppUrl } from '../../lib/appUrl';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -156,7 +157,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setSuccessNotice(null);
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: getAppUrl('/'),
+      });
       setIsLoading(false);
       if (error) {
         setErrorMessage(sanitizeError(error.message));
