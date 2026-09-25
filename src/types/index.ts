@@ -161,6 +161,47 @@ export interface UserSettings {
   targetCollege: string; // e.g. "IISc Bangalore (M.Tech AI) / IIT Bombay"
 }
 
+export interface LinkedAppletConfig {
+  appletId: string;
+  projectId: string;
+  appletUrl: string;
+  label: string;
+  lastSyncedAt: string | null;
+  autoSync: boolean;
+  status: 'synced' | 'syncing' | 'error' | 'idle';
+  statusMessage?: string;
+  syncedStats?: {
+    topicsCompleted: number;
+    totalHours: number;
+    pyqsSolved: number;
+    tasksCount: number;
+    mockTestsCount: number;
+  };
+}
+
+export interface AppletSyncPayload {
+  appletId: string;
+  projectId?: string;
+  sourceAppletUrl?: string;
+  timestamp: string;
+  user: AuthUser | null;
+  syllabus: {
+    totalTopics: number;
+    completedTopics: number;
+    syllabusPercent: number;
+    subjects: Subject[];
+  };
+  studyData: {
+    totalHoursStudied: number;
+    totalPyqsSolved: number;
+    overallPyqAccuracy: number;
+    tasks: Task[];
+    mockTests: MockTest[];
+    settings: UserSettings;
+    customResources?: Record<string, StudyResource[]>;
+  };
+}
+
 export interface AuthUser {
   id: string;
   email: string;

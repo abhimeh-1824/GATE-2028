@@ -10,6 +10,8 @@ import {
   TopicStatus,
   SubjectId,
   AuthUser,
+  LinkedAppletConfig,
+  AppletSyncPayload,
 } from '../types';
 import {
   INITIAL_SUBJECTS,
@@ -34,6 +36,18 @@ import {
   fetchSyllabusFromDatabase,
   saveSyllabusToDatabase,
 } from '../lib/supabaseService';
+import {
+  getLinkedAppletConfig,
+  saveLinkedAppletConfig,
+  buildSyncPayload,
+  pushSyncToLinkedApplet,
+  pullSyncFromLinkedApplet,
+  mergeRemotePayloadIntoLocal,
+  subscribeToLinkedAppletBroadcast,
+  DEFAULT_LINKED_APPLET_ID,
+  DEFAULT_LINKED_PROJECT_ID,
+  DEFAULT_LINKED_APPLET_URL,
+} from '../lib/linkedAppletSyncService';
 
 interface StudyContextType {
   // Auth & Multiple Users
@@ -59,6 +73,16 @@ interface StudyContextType {
   dbStats: { subjectsCount: number; topicsCount: number; subtopicsCount: number };
   syncSyllabusToDb: () => Promise<void>;
   fetchSyllabusFromDb: () => Promise<void>;
+
+  // Linked AI Studio Applet Sync (Target: 2a25406d-a516-461a-aab7-208d3865f39c)
+  linkedAppletConfig: LinkedAppletConfig;
+  isSyncingLinkedApplet: boolean;
+  linkedSyncMessage: string | null;
+  syncWithLinkedApplet: (direction?: 'push' | 'pull' | 'bidirectional') => Promise<{ success: boolean; message: string }>;
+  updateLinkedAppletConfig: (updates: Partial<LinkedAppletConfig>) => void;
+  toggleLinkedAutoSync: () => void;
+  isLinkedSyncModalOpen: boolean;
+  setIsLinkedSyncModalOpen: (open: boolean) => void;
 
   // Study Data
   subjects: Subject[];
@@ -232,6 +256,28 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       0
     ),
   });
+
+  // Linked AI Studio Applet Sync state (Target Applet: 2a25406d-a516-461a-aab7-208d3865f39c)
+  const [linkedAppletConfig, setLinkedAppletConfig] = useState<LinkedAppletConfig>(getLinkedAppletConfig);
+  const [isSyncingLinkedApplet, setIsSyncingLinkedApplet] = useState<boolean>(false);
+  const [linkedSyncMessage, setLinkedSyncMessage] = useState<string | null>(null);
+  const [isLinkedSyncModalOpen, setIsLinkedSyncModalOpen] = useState<boolean>(false);
+
+  const updateLinkedAppletConfig = useCallback((updates: Partial<LinkedAppletConfig>) => {
+    setLinkedAppletConfig((prev) => {
+      const updated = { ...prev, ...updates };
+      saveLinkedAppletConfig(updated);
+      return updated;
+    });
+  }, []);
+
+  const toggleLinkedAutoSync = useCallback(() => {
+    setLinkedAppletConfig((prev) => {
+      const updated = { ...prev, autoSync: !prev.autoSync };
+      saveLinkedAppletConfig(updated);
+      return updated;
+    });
+  }, []);
 
   const fetchSyllabusFromDb = useCallback(async () => {
     setIsSyncingDb(true);
@@ -672,6 +718,109 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
   };
 
+  // Perform full bi-directional or directed synchronization with Linked Applet (2a25406d)
+  const syncWithLinkedApplet = useCallback(
+    async (direction: 'push' | 'pull' | 'bidirectional' = 'bidirectional') => {
+      setIsSyncingLinkedApplet(true);
+      setLinkedSyncMessage(`Connecting to linked applet ${DEFAULT_LINKED_APPLET_ID}...`);
+      try {
+        let mergedResult: any = null;
+        if (direction === 'pull' || direction === 'bidirectional') {
+          const pullRes = await pullSyncFromLinkedApplet();
+          if (pullRes.success && pullRes.payload) {
+            mergedResult = mergeRemotePayloadIntoLocal(
+              subjects,
+              tasks,
+              mockTests,
+              totalHoursStudied,
+              settings,
+              pullRes.payload
+            );
+            setSubjects(mergedResult.mergedSubjects);
+            setTasks(mergedResult.mergedTasks);
+            setMockTests(mergedResult.mergedMocks);
+            setBaseLoggedHours(mergedResult.mergedHours);
+            setSettings(mergedResult.mergedSettings);
+          }
+        }
+
+        const subjectsToPush = mergedResult ? mergedResult.mergedSubjects : subjects;
+        const tasksToPush = mergedResult ? mergedResult.mergedTasks : tasks;
+        const mocksToPush = mergedResult ? mergedResult.mergedMocks : mockTests;
+        const hoursToPush = mergedResult ? mergedResult.mergedHours : totalHoursStudied;
+        const settingsToPush = mergedResult ? mergedResult.mergedSettings : settings;
+
+        const payload = buildSyncPayload(
+          currentUser,
+          subjectsToPush,
+          hoursToPush,
+          tasksToPush,
+          mocksToPush,
+          settingsToPush
+        );
+
+        const pushRes = await pushSyncToLinkedApplet(payload);
+        const freshConfig = getLinkedAppletConfig();
+        setLinkedAppletConfig(freshConfig);
+        const msg = mergedResult
+          ? `${mergedResult.changesSummary} · ${pushRes.message}`
+          : pushRes.message;
+        setLinkedSyncMessage(msg);
+        soundManager.playCompletionChime();
+        return { success: true, message: msg };
+      } catch (err: any) {
+        console.error('syncWithLinkedApplet error:', err);
+        const errMsg = err?.message || 'Sync encountered an error';
+        setLinkedSyncMessage(errMsg);
+        return { success: false, message: errMsg };
+      } finally {
+        setIsSyncingLinkedApplet(false);
+      }
+    },
+    [currentUser, subjects, totalHoursStudied, tasks, mockTests, settings]
+  );
+
+  // Real-time broadcast channel subscription across open companion applet tabs
+  useEffect(() => {
+    const unsubscribe = subscribeToLinkedAppletBroadcast((remotePayload) => {
+      if (remotePayload && remotePayload.syllabus) {
+        setSubjects((prevSubjects) => {
+          const merged = mergeRemotePayloadIntoLocal(
+            prevSubjects,
+            tasks,
+            mockTests,
+            totalHoursStudied,
+            settings,
+            remotePayload
+          );
+          return merged.mergedSubjects;
+        });
+        setLinkedSyncMessage(`Live update received from linked applet (${DEFAULT_LINKED_APPLET_ID}).`);
+        setTimeout(() => setLinkedSyncMessage(null), 4000);
+      }
+    });
+    return unsubscribe;
+  }, [tasks, mockTests, totalHoursStudied, settings]);
+
+  // Debounced auto-sync to linked applet when autoSync is enabled
+  useEffect(() => {
+    if (!linkedAppletConfig.autoSync) return;
+    const timeout = setTimeout(() => {
+      const payload = buildSyncPayload(
+        currentUser,
+        subjects,
+        totalHoursStudied,
+        tasks,
+        mockTests,
+        settings
+      );
+      pushSyncToLinkedApplet(payload).catch((err) => {
+        console.warn('Auto-sync notice:', err);
+      });
+    }, 4000);
+    return () => clearTimeout(timeout);
+  }, [subjects, tasks, mockTests, totalHoursStudied, linkedAppletConfig.autoSync, currentUser, settings]);
+
   return (
     <StudyContext.Provider
       value={{
@@ -689,6 +838,14 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         dbStats,
         syncSyllabusToDb,
         fetchSyllabusFromDb,
+        linkedAppletConfig,
+        isSyncingLinkedApplet,
+        linkedSyncMessage,
+        syncWithLinkedApplet,
+        updateLinkedAppletConfig,
+        toggleLinkedAutoSync,
+        isLinkedSyncModalOpen,
+        setIsLinkedSyncModalOpen,
         subjects,
         tasks,
         mockTests,

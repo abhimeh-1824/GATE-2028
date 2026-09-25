@@ -13,7 +13,9 @@ import {
   RotateCcw,
   BookMarked,
   Award,
-  Users
+  Users,
+  Compass,
+  HelpCircle,
 } from 'lucide-react';
 import { useStudy } from '../context/StudyContext';
 import { soundManager } from '../utils/audio';
@@ -22,12 +24,14 @@ interface SidebarProps {
   onOpenFormulaVault: () => void;
   onOpenSettingsModal: () => void;
   onOpenAuthModal: () => void;
+  onOpenTour?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   onOpenFormulaVault,
   onOpenSettingsModal,
   onOpenAuthModal,
+  onOpenTour,
 }) => {
   const {
     activeView,
@@ -105,6 +109,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Users,
       badge: 'Compare',
       badgeColor: 'text-indigo-700 bg-indigo-50 font-mono',
+    },
+    {
+      id: 'Guide',
+      label: 'Prep Guide & Strategy',
+      icon: Compass,
+      badge: 'Handbook',
+      badgeColor: 'text-emerald-700 bg-emerald-50 font-bold',
     },
   ];
 
@@ -212,6 +223,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {allUsers.length > 0 ? `${allUsers.length} Users` : '0% Base'}
           </span>
         </button>
+
+        {onOpenTour && (
+          <button
+            onClick={onOpenTour}
+            className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs font-semibold text-purple-700 bg-purple-50/60 hover:bg-purple-100/70 border border-purple-200/60 transition-colors"
+          >
+            <HelpCircle className="w-4 h-4 text-purple-600" />
+            <span>Platform Tour &amp; Guide</span>
+          </button>
+        )}
       </nav>
 
       {/* Footer Section */}

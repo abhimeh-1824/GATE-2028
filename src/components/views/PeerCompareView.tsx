@@ -27,8 +27,10 @@ import {
   RefreshCw,
   UploadCloud,
   Check,
-  UserPlus
+  UserPlus,
+  Link2,
 } from 'lucide-react';
+import { DEFAULT_LINKED_APPLET_URL } from '../../lib/linkedAppletSyncService';
 
 export const PeerCompareView: React.FC = () => {
   const {
@@ -38,6 +40,11 @@ export const PeerCompareView: React.FC = () => {
     mockTests,
     settings,
     setIsAuthModalOpen,
+    linkedAppletConfig,
+    syncWithLinkedApplet,
+    isSyncingLinkedApplet,
+    setIsLinkedSyncModalOpen,
+    linkedSyncMessage,
   } = useStudy();
 
   const [activeTab, setActiveTab] = useState<'charts' | 'directory' | 'leaderboard'>('charts');

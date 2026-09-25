@@ -14,7 +14,8 @@ import {
   Sigma,
   Calendar,
   ChevronRight,
-  Users
+  Users,
+  Compass,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
 import { soundManager } from '../../utils/audio';
@@ -211,6 +212,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </span>
           </div>
         </div>
+      </section>
+
+      {/* GATE DA Comprehensive Master Guide Banner */}
+      <section className="bg-linear-to-r from-indigo-950 via-slate-900 to-indigo-900 text-white rounded-xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 border border-indigo-800/80">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-amber-400/20 border border-amber-300/30 flex items-center justify-center text-amber-300 shrink-0">
+            <Compass className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold text-amber-300 font-mono uppercase tracking-wider">
+                COMPREHENSIVE PREPARATION HANDBOOK
+              </span>
+              <span className="text-[10px] bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 px-2 py-0.5 rounded font-mono">
+                GATE DA 2028 Strategy
+              </span>
+            </div>
+            <h3 className="text-base font-bold text-white mt-0.5">
+              Official Exam Blueprint, Marking Rules, MSQ Survival &amp; Textbooks
+            </h3>
+            <p className="text-xs text-slate-300 mt-0.5">
+              Subject-wise ROI priority matrix, examiner trap alerts, 3-pass exam hall time management, and companion applet data sync.
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => setActiveView('Guide')}
+          className="px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-2 transition-colors shrink-0 shadow-sm"
+        >
+          <span>Open Master Guide</span>
+          <ArrowUpRight className="w-4 h-4" />
+        </button>
       </section>
 
       {/* Peer Benchmarking & Comparison Quick Banner */}

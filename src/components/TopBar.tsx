@@ -9,7 +9,11 @@ import {
   Download,
   Upload,
   CheckCircle2,
-  ChevronRight
+  ChevronRight,
+  RefreshCw,
+  Link2,
+  Compass,
+  HelpCircle,
 } from 'lucide-react';
 import { useStudy } from '../context/StudyContext';
 
@@ -18,6 +22,7 @@ interface TopBarProps {
   onOpenAddTask: () => void;
   onOpenBackup: () => void;
   onOpenAuthModal?: () => void;
+  onOpenTour?: () => void;
 }
 
 const ACADEMIC_MOTTOS = [
@@ -33,8 +38,17 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenAddTask,
   onOpenBackup,
   onOpenAuthModal,
+  onOpenTour,
 }) => {
-  const { activeView, timerState, startTimer, pauseTimer, resetTimer, currentUser } = useStudy();
+  const {
+    activeView,
+    setActiveView,
+    timerState,
+    startTimer,
+    pauseTimer,
+    resetTimer,
+    currentUser,
+  } = useStudy();
   const [mottoIndex, setMottoIndex] = useState(0);
 
   // Format today's date
@@ -131,6 +145,32 @@ export const TopBar: React.FC<TopBarProps> = ({
           <Plus className="w-3.5 h-3.5" />
           <span>New Task</span>
         </button>
+
+        {/* Prep Guide Quick Switch */}
+        <button
+          onClick={() => setActiveView('Guide')}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+            activeView === 'Guide'
+              ? 'border-indigo-600 bg-indigo-700 text-white shadow-2xs'
+              : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
+          }`}
+          title="Open GATE DA Master Preparation Guide & Strategy Handbook"
+        >
+          <Compass className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Prep Guide</span>
+        </button>
+
+        {/* Platform Tour & How to Operate */}
+        {onOpenTour && (
+          <button
+            onClick={onOpenTour}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-purple-200 bg-purple-50/80 hover:bg-purple-100 text-purple-800 text-xs font-semibold transition-all shadow-2xs"
+            title="Platform Guide & Feature Tour - Learn how to operate this platform"
+          >
+            <HelpCircle className="w-3.5 h-3.5 text-purple-600" />
+            <span className="hidden md:inline">Platform Tour</span>
+          </button>
+        )}
 
         {/* Backup / Export Trigger */}
         <button

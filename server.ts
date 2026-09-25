@@ -9,11 +9,82 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
+
+// Cross-Applet Sync Storage (in-memory + local file cache)
+const appletSyncStorage = new Map<string, { payload: any; updatedAt: string }>();
+const SYNC_CACHE_DIR = path.join(__dirname, '.sync_cache');
+if (!fs.existsSync(SYNC_CACHE_DIR)) {
+  try {
+    fs.mkdirSync(SYNC_CACHE_DIR, { recursive: true });
+  } catch {
+    // ignore
+  }
+}
 
 // Standard healthcheck endpoints for Cloud Run / GCP probes
 app.get(['/api/health', '/health', '/healthz'], (_req, res) => {
   res.status(200).json({ status: 'ok', uptime: process.uptime() });
+});
+
+// Applet Sync API routes for cross-applet synchronization
+const LINKED_APPLET_ID = '2a25406d-a516-461a-aab7-208d3865f39c';
+
+app.post(['/api/sync/linked', `/api/sync/${LINKED_APPLET_ID}`, '/api/sync/:appletId'], (req, res) => {
+  const targetId = req.params.appletId || LINKED_APPLET_ID;
+  const payload = req.body;
+  const updatedAt = new Date().toISOString();
+
+  appletSyncStorage.set(targetId, { payload, updatedAt });
+
+  try {
+    const cachePath = path.join(SYNC_CACHE_DIR, `${targetId}.json`);
+    fs.writeFileSync(cachePath, JSON.stringify({ payload, updatedAt }), 'utf8');
+  } catch (err) {
+    console.warn('Sync cache write notice:', err);
+  }
+
+  res.status(200).json({
+    success: true,
+    appletId: targetId,
+    updatedAt,
+    message: `State synchronized successfully for applet ${targetId}`,
+  });
+});
+
+app.get(['/api/sync/linked', `/api/sync/${LINKED_APPLET_ID}`, '/api/sync/:appletId'], (req, res) => {
+  const targetId = req.params.appletId || LINKED_APPLET_ID;
+  let record = appletSyncStorage.get(targetId);
+
+  if (!record) {
+    try {
+      const cachePath = path.join(SYNC_CACHE_DIR, `${targetId}.json`);
+      if (fs.existsSync(cachePath)) {
+        const raw = fs.readFileSync(cachePath, 'utf8');
+        record = JSON.parse(raw);
+        if (record) {
+          appletSyncStorage.set(targetId, record);
+        }
+      }
+    } catch (err) {
+      console.warn('Sync cache read notice:', err);
+    }
+  }
+
+  if (record) {
+    res.status(200).json({
+      success: true,
+      appletId: targetId,
+      updatedAt: record.updatedAt,
+      payload: record.payload,
+    });
+  } else {
+    res.status(404).json({
+      success: false,
+      appletId: targetId,
+      message: `No active sync state found for applet ${targetId}`,
+    });
+  }
 });
 
 // Serve static assets from dist

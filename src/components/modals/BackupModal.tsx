@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Download, Upload, Check, AlertCircle, Copy } from 'lucide-react';
+import { X, Download, Upload, Check, AlertCircle, Copy, Link2, RefreshCw } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
 
 interface BackupModalProps {
@@ -8,7 +8,14 @@ interface BackupModalProps {
 }
 
 export const BackupModal: React.FC<BackupModalProps> = ({ isOpen, onClose }) => {
-  const { exportDataJson, importDataJson } = useStudy();
+  const {
+    exportDataJson,
+    importDataJson,
+    linkedAppletConfig,
+    syncWithLinkedApplet,
+    isSyncingLinkedApplet,
+    setIsLinkedSyncModalOpen,
+  } = useStudy();
   const [importText, setImportText] = useState('');
   const [copied, setCopied] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);

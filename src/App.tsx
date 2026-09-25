@@ -8,6 +8,7 @@ import { AddTaskModal } from './components/modals/AddTaskModal';
 import { BackupModal } from './components/modals/BackupModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { AuthModal } from './components/modals/AuthModal';
+import { PlatformTourModal } from './components/modals/PlatformTourModal';
 import { DashboardView } from './components/views/DashboardView';
 import { DailyView } from './components/views/DailyView';
 import { WeeklyView } from './components/views/WeeklyView';
@@ -16,16 +17,23 @@ import { RoadmapView } from './components/views/RoadmapView';
 import { AnalyticsView } from './components/views/AnalyticsView';
 import { CalendarView } from './components/views/CalendarView';
 import { PeerCompareView } from './components/views/PeerCompareView';
+import { GuideView } from './components/views/GuideView';
 import { SubjectId } from './types';
 
 const MainAppContent: React.FC = () => {
-  const { activeView, setActiveView, isAuthModalOpen, setIsAuthModalOpen } = useStudy();
+  const {
+    activeView,
+    setActiveView,
+    isAuthModalOpen,
+    setIsAuthModalOpen,
+  } = useStudy();
 
   const [isOmniboxOpen, setIsOmniboxOpen] = useState(false);
   const [isFormulaVaultOpen, setIsFormulaVaultOpen] = useState(false);
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false);
   const [isBackupOpen, setIsBackupOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isTourOpen, setIsTourOpen] = useState(false);
 
   const [selectedSubjectId, setSelectedSubjectId] = useState<SubjectId | undefined>('linear_algebra');
   const [selectedFormulaId, setSelectedFormulaId] = useState<string | null>(null);
@@ -67,6 +75,7 @@ const MainAppContent: React.FC = () => {
         }}
         onOpenSettingsModal={() => setIsSettingsOpen(true)}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onOpenTour={() => setIsTourOpen(true)}
       />
 
       {/* Main Content Column */}
@@ -77,6 +86,7 @@ const MainAppContent: React.FC = () => {
           onOpenAddTask={() => setIsAddTaskOpen(true)}
           onOpenBackup={() => setIsBackupOpen(true)}
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
+          onOpenTour={() => setIsTourOpen(true)}
         />
 
         {/* Scrollable Viewport */}
@@ -115,6 +125,10 @@ const MainAppContent: React.FC = () => {
           {activeView === 'Calendar' && <CalendarView />}
 
           {activeView === 'PeerCompare' && <PeerCompareView />}
+
+          {activeView === 'Guide' && (
+            <GuideView onOpenTour={() => setIsTourOpen(true)} />
+          )}
         </main>
       </div>
 
@@ -153,6 +167,15 @@ const MainAppContent: React.FC = () => {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
+      />
+
+      <PlatformTourModal
+        isOpen={isTourOpen}
+        onClose={() => setIsTourOpen(false)}
+        onStartStudying={() => {
+          setIsTourOpen(false);
+          setActiveView('Daily');
+        }}
       />
     </div>
   );
