@@ -94,38 +94,6 @@ export const DailyView: React.FC<DailyViewProps> = ({ onOpenAddTask }) => {
     setSelectedDate(d.toISOString().split('T')[0]);
   };
 
-  // Structured time blocks
-  const timeBlocks = [
-    {
-      time: '06:30 - 09:00',
-      period: 'Morning Math Rigor',
-      subject: 'Linear Algebra & Probability',
-      activity: 'Deep proof derivations, Sheldon Ross chapter problems',
-      color: 'border-l-indigo-600 bg-indigo-50/30',
-    },
-    {
-      time: '11:00 - 13:00',
-      period: 'CS Core & Algorithms',
-      subject: 'Data Structures / DBMS',
-      activity: 'Balanced trees, Graph shortest paths, BCNF decomposition proofs',
-      color: 'border-l-amber-500 bg-amber-50/30',
-    },
-    {
-      time: '14:30 - 17:00',
-      period: 'Afternoon Problem Solving',
-      subject: 'GATE DA PYQ Drills',
-      activity: 'Timed 30-question CBT set with virtual calculator accuracy check',
-      color: 'border-l-emerald-600 bg-emerald-50/30',
-    },
-    {
-      time: '20:00 - 22:00',
-      period: 'Evening Spaced Retrieval',
-      subject: 'Formula Vault & Flashcards',
-      activity: 'Active recall testing on critical traps and machine learning cost gradients',
-      color: 'border-l-purple-600 bg-purple-50/30',
-    },
-  ];
-
   return (
     <div className="space-y-6 pb-12">
       {/* Top Date Header & Day Navigator */}
@@ -433,45 +401,8 @@ export const DailyView: React.FC<DailyViewProps> = ({ onOpenAddTask }) => {
         </div>
       </section>
 
-      {/* Time-Blocked Academic Schedule & Daily Notes */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Time-Blocked Routine Matrix (7 Cols) */}
-        <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-3.5">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900">
-              Optimal Time-Blocked Routine (GATE DA Protocol)
-            </h3>
-            <p className="text-[11px] text-slate-500">
-              Synchronized with IISc / IIT examination cognitive peak windows
-            </p>
-          </div>
-
-          <div className="space-y-2.5">
-            {timeBlocks.map((block, idx) => (
-              <div
-                key={idx}
-                className={`p-3 rounded-lg border-l-4 border border-slate-200/80 ${block.color} flex flex-col sm:flex-row sm:items-center justify-between gap-2`}
-              >
-                <div>
-                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-800">
-                    <span className="font-mono text-slate-500">{block.time}</span>
-                    <span>·</span>
-                    <span>{block.period}</span>
-                  </div>
-                  <p className="text-[11px] text-slate-600 mt-0.5">
-                    {block.activity}
-                  </p>
-                </div>
-                <span className="text-[10px] font-semibold text-indigo-700 bg-white/80 px-2 py-0.5 rounded border border-indigo-100 self-start sm:self-center shrink-0">
-                  {block.subject}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Daily Academic Journal & Realizations (5 Cols) */}
-        <div className="lg:col-span-5 bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-3 flex flex-col justify-between">
+      {/* Daily Academic Journal & Realizations */}
+      <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-3 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-1">
               <h3 className="text-sm font-bold text-slate-900">
@@ -504,7 +435,6 @@ export const DailyView: React.FC<DailyViewProps> = ({ onOpenAddTask }) => {
               <span>Save Study Notes</span>
             </button>
           </div>
-        </div>
       </section>
 
       {/* Edit Task Modal */}
