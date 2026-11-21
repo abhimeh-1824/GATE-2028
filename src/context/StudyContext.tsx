@@ -13,6 +13,14 @@ import {
   TopicStatus,
   SubjectId,
   AuthUser,
+  UserRole,
+  SubtopicItem,
+  StudyNote,
+  LevelTest,
+  TestAttempt,
+  NoteEntityType,
+  NoteType,
+  CorrectOptionKey,
   LinkedAppletConfig,
   AppletSyncPayload,
 } from '../types';
@@ -37,7 +45,27 @@ import {
   loadTasksFromSupabase,
   fetchSyllabusFromDatabase,
   saveSyllabusToDatabase,
+  fetchUserRole,
+  updateSubjectInDb,
+  deleteSubjectInDb,
+  updateTopicInDb,
+  deleteTopicInDb,
+  reorderTopicsInDb,
+  updateSubtopicInDb,
+  deleteSubtopicInDb,
+  reorderSubtopicsInDb,
 } from '../lib/supabaseService';
+import {
+  fetchAllStudyNotes,
+  fetchAllLevelTests,
+  fetchTestAttempts,
+  upsertStudyNote,
+  deleteStudyNote,
+  createLevelTest,
+  updateLevelTest,
+  deleteLevelTest,
+  submitTestAttempt,
+} from '../lib/notesTestsService';
 import {
   getLinkedAppletConfig,
   saveLinkedAppletConfig,
@@ -126,10 +154,64 @@ interface StudyContextType {
   completeSprint: (sprintId: string, retro: SprintRetrospective) => void;
   deleteSprint: (sprintId: string) => void;
   addSubject: (name: string, shortCode: string) => Promise<string>;
+  updateSubject: (subjectId: SubjectId, name: string, shortCode: string) => Promise<void>;
+  deleteSubject: (subjectId: SubjectId) => Promise<void>;
   addTopic: (subjectId: SubjectId, title: string) => Promise<void>;
+  updateTopic: (subjectId: SubjectId, topicId: string, title: string) => Promise<void>;
+  deleteTopic: (subjectId: SubjectId, topicId: string) => Promise<void>;
+  reorderTopics: (subjectId: SubjectId, fromIndex: number, toIndex: number) => Promise<void>;
   addSubtopic: (subjectId: SubjectId, topicId: string, name: string) => Promise<void>;
+  updateSubtopic: (subjectId: SubjectId, topicId: string, subtopicIndex: number, name: string) => Promise<void>;
+  deleteSubtopic: (subjectId: SubjectId, topicId: string, subtopicIndex: number) => Promise<void>;
+  reorderSubtopics: (subjectId: SubjectId, topicId: string, fromIndex: number, toIndex: number) => Promise<void>;
   updateTopicStatus: (subjectId: SubjectId, topicId: string, status: TopicStatus) => void;
   updateTopicConfidence: (subjectId: SubjectId, topicId: string, confidence: number) => void;
+
+  // Role-Based Access & Hierarchical Notes / Tests
+  userRole: UserRole;
+  isAdmin: boolean;
+  canManageContent: boolean;
+  studyNotes: StudyNote[];
+  levelTests: LevelTest[];
+  testAttempts: TestAttempt[];
+  notesTestsLoading: boolean;
+  notesTestsNotice: string | null;
+  refreshNotesAndTests: () => Promise<void>;
+  saveStudyNote: (input: {
+    entityType: NoteEntityType;
+    entityId: string;
+    subjectId: string;
+    topicId?: string | null;
+    subtopicId?: string | null;
+    noteType: NoteType;
+    title: string;
+    rawHtml: string;
+  }) => Promise<{ success: boolean; note?: StudyNote; error?: string }>;
+  removeStudyNote: (noteId: string) => Promise<{ success: boolean; error?: string }>;
+  addLevelTest: (input: {
+    entityType: NoteEntityType;
+    entityId: string;
+    subjectId: string;
+    topicId?: string | null;
+    subtopicId?: string | null;
+    title: string;
+    description?: string;
+    durationMinutes: number;
+    passingPercentage: number;
+    isActive: boolean;
+  }) => Promise<{ success: boolean; test?: LevelTest; error?: string }>;
+  editLevelTest: (
+    testId: string,
+    patch: Partial<Pick<LevelTest, 'title' | 'description' | 'durationMinutes' | 'passingPercentage' | 'isActive'>>
+  ) => Promise<{ success: boolean; test?: LevelTest; error?: string }>;
+  removeLevelTest: (testId: string) => Promise<{ success: boolean; error?: string }>;
+  recordTestAttempt: (input: {
+    testId: string;
+    answers: Record<string, CorrectOptionKey>;
+    score: number;
+    totalQuestions: number;
+    timeTakenSeconds: number;
+  }) => Promise<{ success: boolean; attempt?: TestAttempt; error?: string }>;
   addMockTest: (mock: Omit<MockTest, 'id'>) => void;
   updateMockTest: (mockId: string, updates: Partial<MockTest>) => void;
   deleteMockTest: (mockId: string) => void;
@@ -974,7 +1056,9 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const persistSyllabus = async (updatedSubjects: Subject[]) => {
     if (!currentUser || currentUser.id.startsWith('demo_') || currentUser.id.startsWith('guest_')) {
-      throw new Error('Sign in with a Supabase account before adding syllabus entries.');
+      setSubjects(updatedSubjects);
+      soundManager.playSubtleTick();
+      return;
     }
 
     const result = await saveSyllabusToDatabase(updatedSubjects, currentUser.id);
@@ -1017,6 +1101,34 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return subject.id;
   };
 
+  const updateSubject = async (subjectId: SubjectId, name: string, shortCode: string) => {
+    const cleanName = name.trim();
+    const cleanCode = shortCode.trim().toUpperCase();
+    if (!cleanName || !cleanCode) throw new Error('Subject name and code are required.');
+
+    if (currentUser && !isDemo) {
+      const res = await updateSubjectInDb(subjectId, { name: cleanName, code: cleanCode });
+      if (!res.success) throw new Error(res.error || 'Could not update subject.');
+    }
+
+    setSubjects((prev) =>
+      prev.map((s) => (s.id === subjectId ? { ...s, name: cleanName, shortCode: cleanCode } : s))
+    );
+    soundManager.playSubtleTick();
+  };
+
+  const deleteSubject = async (subjectId: SubjectId) => {
+    if (currentUser && !isDemo) {
+      const res = await deleteSubjectInDb(subjectId);
+      if (!res.success) throw new Error(res.error || 'Could not delete subject.');
+    }
+
+    setSubjects((prev) => prev.filter((s) => s.id !== subjectId));
+    setStudyNotes((prev) => prev.filter((n) => n.subjectId !== subjectId));
+    setLevelTests((prev) => prev.filter((t) => t.subjectId !== subjectId));
+    soundManager.playSubtleTick();
+  };
+
   const addTopic = async (subjectId: SubjectId, title: string) => {
     const cleanTitle = title.trim();
     const subject = subjects.find((item) => item.id === subjectId);
@@ -1031,6 +1143,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       subjectId,
       title: cleanTitle,
       subtopics: [],
+      subtopicItems: [],
       weightageTier: 'Foundational',
       status: 'unvisited',
       confidenceScore: 3,
@@ -1046,6 +1159,68 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     )));
   };
 
+  const updateTopic = async (subjectId: SubjectId, topicId: string, title: string) => {
+    const cleanTitle = title.trim();
+    if (!cleanTitle) throw new Error('Topic name is required.');
+
+    if (currentUser && !isDemo) {
+      const res = await updateTopicInDb(topicId, { name: cleanTitle });
+      if (!res.success) throw new Error(res.error || 'Could not update topic.');
+    }
+
+    setSubjects((prev) =>
+      prev.map((s) =>
+        s.id === subjectId
+          ? { ...s, topics: s.topics.map((t) => (t.id === topicId ? { ...t, title: cleanTitle } : t)) }
+          : s
+      )
+    );
+    soundManager.playSubtleTick();
+  };
+
+  const deleteTopic = async (subjectId: SubjectId, topicId: string) => {
+    if (currentUser && !isDemo) {
+      const res = await deleteTopicInDb(topicId);
+      if (!res.success) throw new Error(res.error || 'Could not delete topic.');
+    }
+
+    setSubjects((prev) =>
+      prev.map((s) =>
+        s.id === subjectId ? { ...s, topics: s.topics.filter((t) => t.id !== topicId) } : s
+      )
+    );
+    setStudyNotes((prev) => prev.filter((n) => n.topicId !== topicId && n.entityId !== topicId));
+    setLevelTests((prev) => prev.filter((t) => t.topicId !== topicId && t.entityId !== topicId));
+    soundManager.playSubtleTick();
+  };
+
+  const reorderTopics = async (subjectId: SubjectId, fromIndex: number, toIndex: number) => {
+    const subject = subjects.find((s) => s.id === subjectId);
+    if (!subject) return;
+    if (
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= subject.topics.length ||
+      toIndex >= subject.topics.length ||
+      fromIndex === toIndex
+    ) {
+      return;
+    }
+
+    const nextTopics = [...subject.topics];
+    const [moved] = nextTopics.splice(fromIndex, 1);
+    nextTopics.splice(toIndex, 0, moved);
+
+    setSubjects((prev) =>
+      prev.map((s) => (s.id === subjectId ? { ...s, topics: nextTopics } : s))
+    );
+
+    if (currentUser && !isDemo) {
+      await reorderTopicsInDb(nextTopics.map((t) => t.id));
+    }
+    soundManager.playSubtleTick();
+  };
+
   const addSubtopic = async (subjectId: SubjectId, topicId: string, name: string) => {
     const cleanName = name.trim();
     const subject = subjects.find((item) => item.id === subjectId);
@@ -1056,18 +1231,303 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       throw new Error('This subtopic already exists in the selected topic.');
     }
 
+    const existingItems: SubtopicItem[] =
+      topic.subtopicItems && topic.subtopicItems.length === topic.subtopics.length
+        ? topic.subtopicItems
+        : topic.subtopics.map((st, idx) => ({
+            id: crypto.randomUUID(),
+            topicId: topic.id,
+            name: st,
+            sortOrder: idx,
+          }));
+
+    const newItem: SubtopicItem = {
+      id: crypto.randomUUID(),
+      topicId: topic.id,
+      name: cleanName,
+      sortOrder: existingItems.length,
+    };
+
     await persistSyllabus(subjects.map((item) => (
       item.id === subjectId
         ? {
             ...item,
             topics: item.topics.map((currentTopic) => (
               currentTopic.id === topicId
-                ? { ...currentTopic, subtopics: [...currentTopic.subtopics, cleanName] }
+                ? {
+                    ...currentTopic,
+                    subtopics: [...currentTopic.subtopics, cleanName],
+                    subtopicItems: [...existingItems, newItem],
+                  }
                 : currentTopic
             )),
           }
         : item
     )));
+  };
+
+  const updateSubtopic = async (
+    subjectId: SubjectId,
+    topicId: string,
+    subtopicIndex: number,
+    name: string
+  ) => {
+    const cleanName = name.trim();
+    if (!cleanName) throw new Error('Subtopic name is required.');
+    const subject = subjects.find((s) => s.id === subjectId);
+    const topic = subject?.topics.find((t) => t.id === topicId);
+    if (!topic || subtopicIndex < 0 || subtopicIndex >= topic.subtopics.length) return;
+
+    const existingItem = topic.subtopicItems?.[subtopicIndex];
+    if (existingItem && currentUser && !isDemo) {
+      const res = await updateSubtopicInDb(existingItem.id, { name: cleanName });
+      if (!res.success) throw new Error(res.error || 'Could not update subtopic.');
+    }
+
+    setSubjects((prev) =>
+      prev.map((s) => {
+        if (s.id !== subjectId) return s;
+        return {
+          ...s,
+          topics: s.topics.map((t) => {
+            if (t.id !== topicId) return t;
+            const nextSubtopics = t.subtopics.map((st, idx) => (idx === subtopicIndex ? cleanName : st));
+            const nextItems = t.subtopicItems?.map((item, idx) =>
+              idx === subtopicIndex ? { ...item, name: cleanName } : item
+            );
+            return { ...t, subtopics: nextSubtopics, subtopicItems: nextItems };
+          }),
+        };
+      })
+    );
+    soundManager.playSubtleTick();
+  };
+
+  const deleteSubtopic = async (subjectId: SubjectId, topicId: string, subtopicIndex: number) => {
+    const subject = subjects.find((s) => s.id === subjectId);
+    const topic = subject?.topics.find((t) => t.id === topicId);
+    if (!topic || subtopicIndex < 0 || subtopicIndex >= topic.subtopics.length) return;
+
+    const existingItem = topic.subtopicItems?.[subtopicIndex];
+    if (existingItem && currentUser && !isDemo) {
+      const res = await deleteSubtopicInDb(existingItem.id);
+      if (!res.success) throw new Error(res.error || 'Could not delete subtopic.');
+    }
+
+    const removedId = existingItem?.id;
+
+    setSubjects((prev) =>
+      prev.map((s) => {
+        if (s.id !== subjectId) return s;
+        return {
+          ...s,
+          topics: s.topics.map((t) => {
+            if (t.id !== topicId) return t;
+            const nextSubtopics = t.subtopics.filter((_, idx) => idx !== subtopicIndex);
+            const nextItems = t.subtopicItems
+              ?.filter((_, idx) => idx !== subtopicIndex)
+              .map((item, idx) => ({ ...item, sortOrder: idx }));
+            return { ...t, subtopics: nextSubtopics, subtopicItems: nextItems };
+          }),
+        };
+      })
+    );
+
+    if (removedId) {
+      setStudyNotes((prev) => prev.filter((n) => n.subtopicId !== removedId && n.entityId !== removedId));
+      setLevelTests((prev) => prev.filter((t) => t.subtopicId !== removedId && t.entityId !== removedId));
+    }
+    soundManager.playSubtleTick();
+  };
+
+  const reorderSubtopics = async (
+    subjectId: SubjectId,
+    topicId: string,
+    fromIndex: number,
+    toIndex: number
+  ) => {
+    const subject = subjects.find((s) => s.id === subjectId);
+    const topic = subject?.topics.find((t) => t.id === topicId);
+    if (!topic) return;
+    if (
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= topic.subtopics.length ||
+      toIndex >= topic.subtopics.length ||
+      fromIndex === toIndex
+    ) {
+      return;
+    }
+
+    const nextSubtopics = [...topic.subtopics];
+    const [movedName] = nextSubtopics.splice(fromIndex, 1);
+    nextSubtopics.splice(toIndex, 0, movedName);
+
+    let nextItems = topic.subtopicItems ? [...topic.subtopicItems] : undefined;
+    if (nextItems && nextItems.length === topic.subtopics.length) {
+      const [movedItem] = nextItems.splice(fromIndex, 1);
+      nextItems.splice(toIndex, 0, movedItem);
+      nextItems = nextItems.map((item, idx) => ({ ...item, sortOrder: idx }));
+    }
+
+    setSubjects((prev) =>
+      prev.map((s) =>
+        s.id === subjectId
+          ? {
+              ...s,
+              topics: s.topics.map((t) =>
+                t.id === topicId ? { ...t, subtopics: nextSubtopics, subtopicItems: nextItems } : t
+              ),
+            }
+          : s
+      )
+    );
+
+    if (nextItems && currentUser && !isDemo) {
+      await reorderSubtopicsInDb(nextItems.map((i) => i.id));
+    }
+    soundManager.playSubtleTick();
+  };
+
+  // ============================================================================
+  // Role-Based Access & Hierarchical Notes / Tests State
+  // ============================================================================
+  const [userRole, setUserRole] = useState<UserRole>('student');
+  const [studyNotes, setStudyNotes] = useState<StudyNote[]>([]);
+  const [levelTests, setLevelTests] = useState<LevelTest[]>([]);
+  const [testAttempts, setTestAttempts] = useState<TestAttempt[]>([]);
+  const [notesTestsLoading, setNotesTestsLoading] = useState<boolean>(false);
+  const [notesTestsNotice, setNotesTestsNotice] = useState<string | null>(null);
+
+  const isAdmin = userRole === 'admin';
+  const canManageContent = userRole === 'admin' || userRole === 'content_manager';
+
+  const refreshNotesAndTests = useCallback(async () => {
+    setNotesTestsLoading(true);
+    try {
+      const [notesRes, testsRes, attemptsRes] = await Promise.all([
+        fetchAllStudyNotes(isDemo),
+        fetchAllLevelTests(isDemo),
+        fetchTestAttempts(currentUser?.id, undefined, isDemo),
+      ]);
+      setStudyNotes(notesRes.data);
+      setLevelTests(testsRes.data);
+      setTestAttempts(attemptsRes.data);
+      const notice = notesRes.error || testsRes.error || attemptsRes.error || null;
+      setNotesTestsNotice(notice);
+    } catch (err) {
+      console.warn('Error loading hierarchical notes & tests:', err);
+    } finally {
+      setNotesTestsLoading(false);
+    }
+  }, [currentUser?.id, isDemo]);
+
+  useEffect(() => {
+    let active = true;
+    const syncRoleAndContent = async () => {
+      if (!currentUser) {
+        if (active) setUserRole('student');
+        return;
+      }
+      if (isDemo || currentUser.isDemo) {
+        if (active) setUserRole(currentUser.role || 'admin');
+      } else {
+        const fetchedRole = await fetchUserRole(currentUser.id);
+        if (active) setUserRole(fetchedRole);
+      }
+      if (active) {
+        await refreshNotesAndTests();
+      }
+    };
+    syncRoleAndContent();
+    return () => {
+      active = false;
+    };
+  }, [currentUser?.id, currentUser?.isDemo, isDemo, refreshNotesAndTests]);
+
+  const saveStudyNote: StudyContextType['saveStudyNote'] = async (input) => {
+    const res = await upsertStudyNote({
+      ...input,
+      userId: currentUser?.id,
+      isDemo,
+    });
+    if (res.data) {
+      setStudyNotes((prev) => {
+        const idx = prev.findIndex(
+          (n) =>
+            n.entityType === res.data!.entityType &&
+            n.entityId === res.data!.entityId &&
+            n.noteType === res.data!.noteType
+        );
+        return idx >= 0
+          ? prev.map((n, i) => (i === idx ? res.data! : n))
+          : [res.data!, ...prev];
+      });
+      soundManager.playCompletionChime();
+      return { success: true, note: res.data };
+    }
+    return { success: false, error: res.error || 'Could not save study note.' };
+  };
+
+  const removeStudyNote: StudyContextType['removeStudyNote'] = async (noteId) => {
+    const res = await deleteStudyNote(noteId, isDemo);
+    if (res.data) {
+      setStudyNotes((prev) => prev.filter((n) => n.id !== noteId));
+      soundManager.playSubtleTick();
+      return { success: true };
+    }
+    return { success: false, error: res.error || 'Could not delete study note.' };
+  };
+
+  const addLevelTest: StudyContextType['addLevelTest'] = async (input) => {
+    const res = await createLevelTest({
+      ...input,
+      userId: currentUser?.id,
+      isDemo,
+    });
+    if (res.data) {
+      setLevelTests((prev) => [res.data!, ...prev]);
+      soundManager.playCompletionChime();
+      return { success: true, test: res.data };
+    }
+    return { success: false, error: res.error || 'Could not create test.' };
+  };
+
+  const editLevelTest: StudyContextType['editLevelTest'] = async (testId, patch) => {
+    const res = await updateLevelTest(testId, patch, isDemo);
+    if (res.data) {
+      setLevelTests((prev) =>
+        prev.map((t) => (t.id === testId ? { ...t, ...res.data!, questionCount: t.questionCount } : t))
+      );
+      soundManager.playSubtleTick();
+      return { success: true, test: res.data };
+    }
+    return { success: false, error: res.error || 'Could not update test.' };
+  };
+
+  const removeLevelTest: StudyContextType['removeLevelTest'] = async (testId) => {
+    const res = await deleteLevelTest(testId, isDemo);
+    if (res.data) {
+      setLevelTests((prev) => prev.filter((t) => t.id !== testId));
+      setTestAttempts((prev) => prev.filter((a) => a.testId !== testId));
+      soundManager.playSubtleTick();
+      return { success: true };
+    }
+    return { success: false, error: res.error || 'Could not delete test.' };
+  };
+
+  const recordTestAttempt: StudyContextType['recordTestAttempt'] = async (input) => {
+    const res = await submitTestAttempt({
+      ...input,
+      userId: currentUser?.id,
+      isDemo,
+    });
+    if (res.data) {
+      setTestAttempts((prev) => [res.data!, ...prev]);
+      soundManager.playCompletionChime();
+      return { success: true, attempt: res.data };
+    }
+    return { success: false, error: res.error || 'Could not record test attempt.' };
   };
 
   const updateTopicStatus = (subjectId: SubjectId, topicId: string, status: TopicStatus) => {
@@ -1539,10 +1999,33 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         completeSprint,
         deleteSprint,
         addSubject,
+        updateSubject,
+        deleteSubject,
         addTopic,
+        updateTopic,
+        deleteTopic,
+        reorderTopics,
         addSubtopic,
+        updateSubtopic,
+        deleteSubtopic,
+        reorderSubtopics,
         updateTopicStatus,
         updateTopicConfidence,
+        userRole,
+        isAdmin,
+        canManageContent,
+        studyNotes,
+        levelTests,
+        testAttempts,
+        notesTestsLoading,
+        notesTestsNotice,
+        refreshNotesAndTests,
+        saveStudyNote,
+        removeStudyNote,
+        addLevelTest,
+        editLevelTest,
+        removeLevelTest,
+        recordTestAttempt,
         addMockTest,
         updateMockTest,
         deleteMockTest,

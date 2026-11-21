@@ -26,11 +26,19 @@ export interface FormulaItem {
   tag: string;
 }
 
+export interface SubtopicItem {
+  id: string;
+  topicId: string;
+  name: string;
+  sortOrder: number;
+}
+
 export interface Topic {
   id: string;
   subjectId: SubjectId;
   title: string;
   subtopics: string[];
+  subtopicItems?: SubtopicItem[];
   weightageTier: 'Critical (High)' | 'Core (Medium)' | 'Foundational';
   status: TopicStatus;
   confidenceScore: number; // 1 to 5
@@ -234,10 +242,13 @@ export interface AppletSyncPayload {
   };
 }
 
+export type UserRole = 'student' | 'content_manager' | 'admin';
+
 export interface AuthUser {
   id: string;
   email: string;
   fullName: string;
+  role?: UserRole;
   targetAir: number;
   targetCollege: string;
   avatarUrl?: string;
@@ -280,3 +291,109 @@ export interface UserProgressProfile {
   subjects: SubjectProgressSummary[];
   fullSubjects?: Subject[];
 }
+
+// ============================================================================
+// Hierarchical Notes & Test Management Types (Subject → Topic → Subtopic)
+// ============================================================================
+export type NoteEntityType = 'subject' | 'topic' | 'subtopic';
+export type NoteType = 'complete' | 'short';
+export type TestDifficulty = 'easy' | 'medium' | 'hard';
+export type CorrectOptionKey = 'A' | 'B' | 'C' | 'D';
+
+export interface StudyNote {
+  id: string;
+  ownerId?: string | null;
+  entityType: NoteEntityType;
+  entityId: string;
+  subjectId: string;
+  topicId?: string | null;
+  subtopicId?: string | null;
+  noteType: NoteType;
+  title: string;
+  htmlContent: string;
+  sanitizedVersion?: number;
+  updatedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TestQuestion {
+  id: string;
+  testId: string;
+  questionText: string;
+  optionA: string;
+  optionB: string;
+  optionC: string;
+  optionD: string;
+  correctAnswer: CorrectOptionKey;
+  explanation?: string;
+  difficulty: TestDifficulty;
+  questionImageUrl?: string;
+  sortOrder: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface LevelTest {
+  id: string;
+  createdBy: string;
+  creatorName?: string;
+  entityType: NoteEntityType;
+  entityId: string;
+  subjectId: string;
+  topicId?: string | null;
+  subtopicId?: string | null;
+  title: string;
+  description: string;
+  durationMinutes: number;
+  passingPercentage: number;
+  isActive: boolean;
+  questionCount?: number;
+  questions?: TestQuestion[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TestAttempt {
+  id: string;
+  testId: string;
+  userId: string;
+  answers: Record<string, CorrectOptionKey>;
+  score: number;
+  totalQuestions: number;
+  percentage: number;
+  timeTakenSeconds: number;
+  completedAt: string;
+}
+
+export interface ParsedQuestionRow {
+  rowNumber: number;
+  questionText: string;
+  optionA: string;
+  optionB: string;
+  optionC: string;
+  optionD: string;
+  correctAnswer: CorrectOptionKey;
+  explanation: string;
+  difficulty: TestDifficulty;
+  questionImageUrl?: string;
+  isValid: boolean;
+  errors: string[];
+}
+
+export interface QuestionImportResult {
+  fileName: string;
+  totalRows: number;
+  validCount: number;
+  invalidCount: number;
+  rows: ParsedQuestionRow[];
+  fileError?: string;
+}
+
+export interface ManagedUserProfile {
+  id: string;
+  fullName: string;
+  role: UserRole;
+  createdAt: string;
+}
+

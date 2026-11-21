@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS public.subtopics (
 CREATE TABLE IF NOT EXISTS public.profiles (
   id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   full_name text NOT NULL DEFAULT 'Aspirant',
-  role text NOT NULL DEFAULT 'student' CHECK (role = 'student'),
+  role text NOT NULL DEFAULT 'student' CHECK (role IN ('student', 'content_manager', 'admin')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -213,6 +213,105 @@ DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_auth_user();
+
+-- ============================================================================
+-- Hierarchical Notes & Test Management (Subject → Topic → Subtopic)
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.get_my_role()
+RETURNS text LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT COALESCE((SELECT role FROM public.profiles WHERE id = auth.uid()), 'student');
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT public.get_my_role() = 'admin';
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_content_manager_or_admin()
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT public.get_my_role() IN ('content_manager', 'admin');
+$$;
+
+CREATE TABLE IF NOT EXISTS public.study_notes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id uuid REFERENCES auth.users (id) ON DELETE SET NULL,
+  entity_type text NOT NULL CHECK (entity_type IN ('subject', 'topic', 'subtopic')),
+  entity_id uuid NOT NULL,
+  subject_id uuid NOT NULL REFERENCES public.subjects (id) ON DELETE CASCADE,
+  topic_id uuid REFERENCES public.topics (id) ON DELETE CASCADE,
+  subtopic_id uuid REFERENCES public.subtopics (id) ON DELETE CASCADE,
+  note_type text NOT NULL CHECK (note_type IN ('complete', 'short')),
+  title text NOT NULL,
+  html_content text NOT NULL,
+  sanitized_version integer NOT NULL DEFAULT 1,
+  updated_by uuid REFERENCES auth.users (id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (entity_type, entity_id, note_type),
+  CONSTRAINT study_notes_hierarchy_consistency CHECK (
+    (entity_type = 'subject'  AND entity_id = subject_id  AND topic_id IS NULL     AND subtopic_id IS NULL) OR
+    (entity_type = 'topic'    AND entity_id = topic_id    AND topic_id IS NOT NULL AND subtopic_id IS NULL) OR
+    (entity_type = 'subtopic' AND entity_id = subtopic_id AND topic_id IS NOT NULL AND subtopic_id IS NOT NULL)
+  )
+);
+
+CREATE TABLE IF NOT EXISTS public.level_tests (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_by uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
+  entity_type text NOT NULL CHECK (entity_type IN ('subject', 'topic', 'subtopic')),
+  entity_id uuid NOT NULL,
+  subject_id uuid NOT NULL REFERENCES public.subjects (id) ON DELETE CASCADE,
+  topic_id uuid REFERENCES public.topics (id) ON DELETE CASCADE,
+  subtopic_id uuid REFERENCES public.subtopics (id) ON DELETE CASCADE,
+  title text NOT NULL,
+  description text NOT NULL DEFAULT '',
+  duration_minutes integer NOT NULL DEFAULT 20 CHECK (duration_minutes >= 1 AND duration_minutes <= 240),
+  passing_percentage numeric NOT NULL DEFAULT 40 CHECK (passing_percentage >= 0 AND passing_percentage <= 100),
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT level_tests_hierarchy_consistency CHECK (
+    (entity_type = 'subject'  AND entity_id = subject_id  AND topic_id IS NULL     AND subtopic_id IS NULL) OR
+    (entity_type = 'topic'    AND entity_id = topic_id    AND topic_id IS NOT NULL AND subtopic_id IS NULL) OR
+    (entity_type = 'subtopic' AND entity_id = subtopic_id AND topic_id IS NOT NULL AND subtopic_id IS NOT NULL)
+  )
+);
+
+CREATE TABLE IF NOT EXISTS public.test_questions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  test_id uuid NOT NULL REFERENCES public.level_tests (id) ON DELETE CASCADE,
+  question_text text NOT NULL,
+  option_a text NOT NULL,
+  option_b text NOT NULL,
+  option_c text NOT NULL,
+  option_d text NOT NULL,
+  correct_answer char(1) NOT NULL CHECK (correct_answer IN ('A', 'B', 'C', 'D')),
+  explanation text NOT NULL DEFAULT '',
+  difficulty text NOT NULL DEFAULT 'medium' CHECK (difficulty IN ('easy', 'medium', 'hard')),
+  question_image_url text,
+  sort_order integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.test_attempts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  test_id uuid NOT NULL REFERENCES public.level_tests (id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
+  answers_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  score integer NOT NULL DEFAULT 0,
+  total_questions integer NOT NULL DEFAULT 0,
+  percentage numeric NOT NULL DEFAULT 0,
+  time_taken_seconds integer NOT NULL DEFAULT 0,
+  completed_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.study_notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.level_tests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.test_questions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.test_attempts ENABLE ROW LEVEL SECURITY;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.study_notes, public.level_tests, public.test_questions, public.test_attempts TO authenticated;
 
 COMMIT;
 

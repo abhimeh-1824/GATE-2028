@@ -1,5 +1,17 @@
 import { supabase } from './supabase';
-import { AuthUser, Task, SubjectId, PriorityLevel, TaskType, Subject, Topic, TopicStatus } from '../types';
+import {
+  AuthUser,
+  Task,
+  SubjectId,
+  PriorityLevel,
+  TaskType,
+  Subject,
+  Topic,
+  TopicStatus,
+  UserRole,
+  SubtopicItem,
+  ManagedUserProfile,
+} from '../types';
 
 export interface AuthResponse {
   user: AuthUser | null;
@@ -156,6 +168,7 @@ export async function signInUser(email: string, password: string): Promise<AuthR
     let fullName = sbUser.user_metadata?.full_name || 'Aspirant';
     let targetAir = Number(sbUser.user_metadata?.target_air) || 1;
     let targetCollege = sbUser.user_metadata?.target_college || 'IISc Bangalore (M.Tech AI)';
+    let role: UserRole = 'student';
 
     try {
       const { data: profile } = await supabase
@@ -166,6 +179,9 @@ export async function signInUser(email: string, password: string): Promise<AuthR
       if (profile?.full_name) {
         fullName = profile.full_name;
       }
+      if (profile?.role === 'admin' || profile?.role === 'content_manager' || profile?.role === 'student') {
+        role = profile.role;
+      }
     } catch (e) {
       console.warn('Could not fetch remote profile:', e);
     }
@@ -174,6 +190,7 @@ export async function signInUser(email: string, password: string): Promise<AuthR
       id: sbUser.id,
       email: sbUser.email || email,
       fullName,
+      role,
       targetAir,
       targetCollege,
       createdAt: sbUser.created_at || new Date().toISOString(),
@@ -519,8 +536,14 @@ export async function saveSyllabusToDatabase(
       });
 
       topic.subtopics.forEach((subtopic, subtopicIndex) => {
+        const existingItem = topic.subtopicItems?.[subtopicIndex];
+        const subtopicId =
+          existingItem && UUID_PATTERN.test(existingItem.id)
+            ? existingItem.id
+            : getDeterministicUuid(`subtop_${topic.id}_${subtopicIndex}`);
+
         dbSubtopics.push({
-          id: getDeterministicUuid(`subtop_${topic.id}_${subtopicIndex}`),
+          id: subtopicId,
           owner_id: ownerId,
           topic_id: topicId,
           name: subtopic,
@@ -615,20 +638,31 @@ export async function fetchSyllabusFromDatabase(ownerId: string): Promise<Syllab
     borderColor: '#c7d2fe',
     description: '',
     recommendedBooks: [],
-    topics: (topicsBySubject.get(subject.id) || []).map((topic) => ({
-      id: topic.id,
-      subjectId: subject.id,
-      title: topic.name,
-      subtopics: (subtopicsByTopic.get(topic.id) || []).map((subtopic) => subtopic.name),
-      weightageTier: getWeightageTier(topic.weightage_tier),
-      status: getTopicStatus(topic.status),
-      confidenceScore: Number(topic.confidence_score ?? 3),
-      pyqsTotal: Number(topic.pyqs_total ?? 0),
-      pyqsSolved: Number(topic.pyqs_solved ?? 0),
-      pyqAccuracy: Number(topic.pyq_accuracy ?? topic.accuracy ?? 0),
-      formulas: [],
-      commonTraps: [],
-    })),
+    topics: (topicsBySubject.get(subject.id) || []).map((topic) => {
+      const rawSubtopics = subtopicsByTopic.get(topic.id) || [];
+      const subtopicItems: SubtopicItem[] = rawSubtopics.map((subtopic, idx) => ({
+        id: subtopic.id,
+        topicId: topic.id,
+        name: subtopic.name,
+        sortOrder: typeof subtopic.sort_order === 'number' ? subtopic.sort_order : idx,
+      }));
+
+      return {
+        id: topic.id,
+        subjectId: subject.id,
+        title: topic.name,
+        subtopics: subtopicItems.map((s) => s.name),
+        subtopicItems,
+        weightageTier: getWeightageTier(topic.weightage_tier),
+        status: getTopicStatus(topic.status),
+        confidenceScore: Number(topic.confidence_score ?? 3),
+        pyqsTotal: Number(topic.pyqs_total ?? 0),
+        pyqsSolved: Number(topic.pyqs_solved ?? 0),
+        pyqAccuracy: Number(topic.pyq_accuracy ?? topic.accuracy ?? 0),
+        formulas: [],
+        commonTraps: [],
+      };
+    }),
   }));
 
   return {
@@ -644,3 +678,191 @@ export async function fetchSyllabusFromDatabase(ownerId: string): Promise<Syllab
       : 'No syllabus entries yet. Add your first subject from the Subjects page.',
   };
 }
+
+/**
+ * Fetches the authenticated user's role from public.profiles.
+ */
+export async function fetchUserRole(userId: string): Promise<UserRole> {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .single();
+    if (error || !data) return 'student';
+    if (data.role === 'admin' || data.role === 'content_manager' || data.role === 'student') {
+      return data.role;
+    }
+    return 'student';
+  } catch {
+    return 'student';
+  }
+}
+
+/**
+ * Admin: Fetch all user profiles for role delegation.
+ */
+export async function fetchAllManagedProfiles(): Promise<{
+  profiles: ManagedUserProfile[];
+  error?: string;
+}> {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, role, created_at')
+      .order('created_at', { ascending: true });
+    if (error) return { profiles: [], error: error.message };
+    return {
+      profiles: (data || []).map((row) => ({
+        id: row.id,
+        fullName: row.full_name || 'Aspirant',
+        role: (row.role === 'admin' || row.role === 'content_manager' ? row.role : 'student') as UserRole,
+        createdAt: row.created_at || new Date().toISOString(),
+      })),
+    };
+  } catch (err: any) {
+    return { profiles: [], error: err?.message || 'Failed to load user profiles.' };
+  }
+}
+
+/**
+ * Admin: Update a user's role (student | content_manager | admin).
+ */
+export async function updateManagedUserRole(
+  targetUserId: string,
+  newRole: UserRole
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ role: newRole, updated_at: new Date().toISOString() })
+      .eq('id', targetUserId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to update user role.' };
+  }
+}
+
+/**
+ * Hierarchy CRUD & Reordering Helpers (Supabase-backed with cascade safety)
+ */
+export async function updateSubjectInDb(
+  subjectId: string,
+  updates: { name?: string; code?: string }
+): Promise<{ success: boolean; error?: string }> {
+  if (!UUID_PATTERN.test(subjectId)) return { success: true };
+  try {
+    const { error } = await supabase.from('subjects').update(updates).eq('id', subjectId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to update subject.' };
+  }
+}
+
+export async function deleteSubjectInDb(
+  subjectId: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!UUID_PATTERN.test(subjectId)) return { success: true };
+  try {
+    const { error } = await supabase.from('subjects').delete().eq('id', subjectId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to delete subject.' };
+  }
+}
+
+export async function updateTopicInDb(
+  topicId: string,
+  updates: { name?: string; weightage_tier?: string; sort_order?: number }
+): Promise<{ success: boolean; error?: string }> {
+  if (!UUID_PATTERN.test(topicId)) return { success: true };
+  try {
+    const { error } = await supabase.from('topics').update(updates).eq('id', topicId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to update topic.' };
+  }
+}
+
+export async function deleteTopicInDb(
+  topicId: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!UUID_PATTERN.test(topicId)) return { success: true };
+  try {
+    const { error } = await supabase.from('topics').delete().eq('id', topicId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to delete topic.' };
+  }
+}
+
+export async function reorderTopicsInDb(
+  orderedTopicIds: string[]
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const validPairs = orderedTopicIds
+      .map((id, index) => ({ id, sort_order: index }))
+      .filter((item) => UUID_PATTERN.test(item.id));
+
+    await Promise.all(
+      validPairs.map((item) =>
+        supabase.from('topics').update({ sort_order: item.sort_order }).eq('id', item.id)
+      )
+    );
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to reorder topics.' };
+  }
+}
+
+export async function updateSubtopicInDb(
+  subtopicId: string,
+  updates: { name?: string; sort_order?: number }
+): Promise<{ success: boolean; error?: string }> {
+  if (!UUID_PATTERN.test(subtopicId)) return { success: true };
+  try {
+    const { error } = await supabase.from('subtopics').update(updates).eq('id', subtopicId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to update subtopic.' };
+  }
+}
+
+export async function deleteSubtopicInDb(
+  subtopicId: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!UUID_PATTERN.test(subtopicId)) return { success: true };
+  try {
+    const { error } = await supabase.from('subtopics').delete().eq('id', subtopicId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to delete subtopic.' };
+  }
+}
+
+export async function reorderSubtopicsInDb(
+  orderedSubtopicIds: string[]
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const validPairs = orderedSubtopicIds
+      .map((id, index) => ({ id, sort_order: index }))
+      .filter((item) => UUID_PATTERN.test(item.id));
+
+    await Promise.all(
+      validPairs.map((item) =>
+        supabase.from('subtopics').update({ sort_order: item.sort_order }).eq('id', item.id)
+      )
+    );
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to reorder subtopics.' };
+  }
+}
+

@@ -26,10 +26,19 @@ import {
   Award,
   Sparkles,
   Link as LinkIcon,
-  Trash2
+  Trash2,
+  ChevronRight,
+  Home,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
-import { SubjectId, TopicStatus, StudyResource } from '../../types';
+import {
+  SubjectId,
+  TopicStatus,
+  StudyResource,
+  StudyNote,
+  LevelTest,
+  NoteType,
+} from '../../types';
 import {
   DEFAULT_SUBJECT_RESOURCES,
   DEFAULT_TOPIC_RESOURCES,
@@ -40,6 +49,9 @@ import {
 import { ResourceViewerModal } from '../modals/ResourceViewerModal';
 import { AddResourceModal } from '../modals/AddResourceModal';
 import { SyllabusEntryModal, SyllabusEntryTarget } from '../modals/SyllabusEntryModal';
+import { HtmlNotesViewerModal } from '../modals/HtmlNotesViewerModal';
+import { TestRunnerModal } from '../modals/TestRunnerModal';
+import { LevelNotesTestsStrip } from '../common/LevelNotesTestsStrip';
 
 interface SubjectsViewProps {
   initialSubjectId?: SubjectId;
@@ -60,6 +72,10 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
     addTopic,
     addSubtopic,
     setIsAuthModalOpen,
+    setActiveView,
+    studyNotes,
+    levelTests,
+    testAttempts,
   } = useStudy();
 
   const [activeSubjectId, setActiveSubjectId] = useState<SubjectId>(
@@ -67,7 +83,30 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
   );
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [expandedTopicId, setExpandedTopicId] = useState<string | null>(null);
+  const [activeSubtopicSelection, setActiveSubtopicSelection] = useState<{
+    topicId: string;
+    index: number;
+  } | null>(null);
   const [entryTarget, setEntryTarget] = useState<SyllabusEntryTarget | null>(null);
+
+  // Hierarchical HTML Notes Viewer & Test Runner Modals
+  const [notesViewerState, setNotesViewerState] = useState<{
+    isOpen: boolean;
+    breadcrumbs: string[];
+    completeNote: StudyNote | null;
+    shortNote: StudyNote | null;
+    initialNoteType: NoteType;
+  }>({
+    isOpen: false,
+    breadcrumbs: [],
+    completeNote: null,
+    shortNote: null,
+    initialNoteType: 'complete',
+  });
+  const [activeTestModal, setActiveTestModal] = useState<{
+    test: LevelTest;
+    breadcrumbs: string[];
+  } | null>(null);
 
   // Resource Modals State
   const [selectedResource, setSelectedResource] = useState<StudyResource | null>(null);
@@ -98,6 +137,45 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
     !currentUser.id.startsWith('guest_') &&
     !currentUser.id.includes('aspirant')
   );
+
+  // Lookup helpers for hierarchical Notes & Tests at Subject / Topic / Subtopic levels
+  const getLevelNotes = (entityType: 'subject' | 'topic' | 'subtopic', entityId: string) => ({
+    completeNote:
+      studyNotes.find(
+        (n) => n.entityType === entityType && n.entityId === entityId && n.noteType === 'complete'
+      ) || null,
+    shortNote:
+      studyNotes.find(
+        (n) => n.entityType === entityType && n.entityId === entityId && n.noteType === 'short'
+      ) || null,
+  });
+
+  const getLevelTests = (entityType: 'subject' | 'topic' | 'subtopic', entityId: string) =>
+    levelTests.filter((t) => t.entityType === entityType && t.entityId === entityId);
+
+  const openNotesModal = (
+    entityType: 'subject' | 'topic' | 'subtopic',
+    entityId: string,
+    breadcrumbs: string[],
+    initialNoteType: NoteType
+  ) => {
+    const { completeNote, shortNote } = getLevelNotes(entityType, entityId);
+    setNotesViewerState({
+      isOpen: true,
+      breadcrumbs,
+      completeNote,
+      shortNote,
+      initialNoteType,
+    });
+  };
+
+  const expandedTopicObj = activeSubject?.topics.find((t) => t.id === expandedTopicId) || null;
+  const selectedSubtopicLabel =
+    expandedTopicObj &&
+    activeSubtopicSelection &&
+    activeSubtopicSelection.topicId === expandedTopicObj.id
+      ? expandedTopicObj.subtopics[activeSubtopicSelection.index] || null
+      : null;
 
   // Active Subject Resources (Default standard + user custom)
   const activeSubjectResources = useMemo(() => {
@@ -333,6 +411,82 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
           </button>
         </div>
       </section>
+
+      {/* Hierarchical Navigation Breadcrumbs */}
+      <nav
+        aria-label="Curriculum Breadcrumb"
+        className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 flex items-center flex-wrap gap-1.5 text-xs"
+      >
+        <button
+          type="button"
+          onClick={() => {
+            setExpandedTopicId(null);
+            setActiveSubtopicSelection(null);
+          }}
+          className="inline-flex items-center gap-1 text-slate-500 hover:text-indigo-700 font-medium"
+        >
+          <Home className="w-3.5 h-3.5" />
+          <span>Subjects</span>
+        </button>
+        <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+        <button
+          type="button"
+          onClick={() => {
+            setExpandedTopicId(null);
+            setActiveSubtopicSelection(null);
+          }}
+          className={`font-semibold truncate max-w-[200px] ${
+            !expandedTopicObj ? 'text-indigo-700' : 'text-slate-600 hover:text-indigo-700'
+          }`}
+        >
+          {activeSubject.name}
+        </button>
+        {expandedTopicObj && (
+          <>
+            <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+            <button
+              type="button"
+              onClick={() => setActiveSubtopicSelection(null)}
+              className={`font-semibold truncate max-w-[220px] ${
+                !selectedSubtopicLabel ? 'text-indigo-700' : 'text-slate-600 hover:text-indigo-700'
+              }`}
+            >
+              {expandedTopicObj.title}
+            </button>
+          </>
+        )}
+        {selectedSubtopicLabel && (
+          <>
+            <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+            <span className="font-bold text-indigo-700 truncate max-w-[240px]">
+              {selectedSubtopicLabel}
+            </span>
+          </>
+        )}
+      </nav>
+
+      {/* SUBJECT-LEVEL HTML NOTES & OPTIONAL TESTS */}
+      {(() => {
+        const subjectNotes = getLevelNotes('subject', activeSubject.id);
+        const subjectTests = getLevelTests('subject', activeSubject.id);
+        return (
+          <LevelNotesTestsStrip
+            level="subject"
+            label={activeSubject.name}
+            completeNote={subjectNotes.completeNote}
+            shortNote={subjectNotes.shortNote}
+            tests={subjectTests}
+            attempts={testAttempts}
+            onOpenNotes={(noteType) =>
+              openNotesModal('subject', activeSubject.id, [activeSubject.name], noteType)
+            }
+            onLaunchTest={(test) =>
+              setActiveTestModal({ test, breadcrumbs: [activeSubject.name] })
+            }
+            onOpenStudio={() => setActiveView('ContentStudio')}
+          />
+        );
+      })()}
 
       {/* CURATED BOOK PDFs & TUTORIAL VIDEOS SECTION */}
       <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-4">
@@ -657,6 +811,38 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
                 {/* Expanded Deep Dive Panel */}
                 {isExpanded && (
                   <div className="p-5 border-t border-slate-100 bg-[#faf8ff] space-y-5 animate-in fade-in duration-150">
+                    {/* TOPIC-LEVEL HTML NOTES & OPTIONAL TESTS */}
+                    {(() => {
+                      const topicNotes = getLevelNotes('topic', topic.id);
+                      const topicTests = getLevelTests('topic', topic.id);
+                      return (
+                        <LevelNotesTestsStrip
+                          level="topic"
+                          label={topic.title}
+                          completeNote={topicNotes.completeNote}
+                          shortNote={topicNotes.shortNote}
+                          tests={topicTests}
+                          attempts={testAttempts}
+                          compact
+                          onOpenNotes={(noteType) =>
+                            openNotesModal(
+                              'topic',
+                              topic.id,
+                              [activeSubject.name, topic.title],
+                              noteType
+                            )
+                          }
+                          onLaunchTest={(test) =>
+                            setActiveTestModal({
+                              test,
+                              breadcrumbs: [activeSubject.name, topic.title],
+                            })
+                          }
+                          onOpenStudio={() => setActiveView('ContentStudio')}
+                        />
+                      );
+                    })()}
+
                     {/* TOPIC-SPECIFIC BOOK PDFs & TUTORIAL VIDEOS */}
                     <div className="space-y-2.5">
                       <div className="flex items-center justify-between">
@@ -763,22 +949,51 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         {topic.subtopics.map((sub, idx) => {
-                          // Find if any resource matches this subtopic
                           const matchingResource = allTopicResources.find(
                             (r) => r.subtopicTitle?.toLowerCase() === sub.toLowerCase()
                           );
+                          const subtopicId =
+                            topic.subtopicItems?.[idx]?.id || `${topic.id}::sub_${idx}`;
+                          const subNotes = getLevelNotes('subtopic', subtopicId);
+                          const subTests = getLevelTests('subtopic', subtopicId).filter(
+                            (t) => t.isActive
+                          );
+                          const hasSubContent =
+                            Boolean(subNotes.completeNote) ||
+                            Boolean(subNotes.shortNote) ||
+                            subTests.length > 0;
+                          const isSubSelected =
+                            activeSubtopicSelection?.topicId === topic.id &&
+                            activeSubtopicSelection?.index === idx;
 
                           return (
                             <div
                               key={idx}
-                              className="flex items-center justify-between p-2.5 rounded-lg bg-white border border-slate-200/80 text-xs text-slate-700 gap-2"
+                              onClick={() =>
+                                setActiveSubtopicSelection(
+                                  isSubSelected ? null : { topicId: topic.id, index: idx }
+                                )
+                              }
+                              className={`flex items-center justify-between p-2.5 rounded-lg border text-xs gap-2 cursor-pointer transition-all ${
+                                isSubSelected
+                                  ? 'bg-indigo-50/70 border-indigo-400 text-indigo-950 font-semibold'
+                                  : 'bg-white border-slate-200/80 hover:border-indigo-300 text-slate-700'
+                              }`}
                             >
                               <div className="flex items-center gap-2 min-w-0">
                                 <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                                 <span className="truncate">{sub}</span>
+                                {hasSubContent && (
+                                  <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                                    Notes/Test
+                                  </span>
+                                )}
                               </div>
 
-                              <div className="flex items-center gap-1 shrink-0">
+                              <div
+                                className="flex items-center gap-1 shrink-0"
+                                onClick={(e) => e.stopPropagation()}
+                              >
                                 {matchingResource ? (
                                   <button
                                     onClick={() => setSelectedResource(matchingResource)}
@@ -812,6 +1027,47 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
                           );
                         })}
                       </div>
+
+                      {/* SUBTOPIC-LEVEL DRILL-DOWN PANEL (Complete Notes, Short Notes, Optional Test) */}
+                      {activeSubtopicSelection &&
+                        activeSubtopicSelection.topicId === topic.id &&
+                        topic.subtopics[activeSubtopicSelection.index] &&
+                        (() => {
+                          const subIdx = activeSubtopicSelection.index;
+                          const subName = topic.subtopics[subIdx];
+                          const subId =
+                            topic.subtopicItems?.[subIdx]?.id || `${topic.id}::sub_${subIdx}`;
+                          const subNotes = getLevelNotes('subtopic', subId);
+                          const subTests = getLevelTests('subtopic', subId);
+                          return (
+                            <div className="mt-3">
+                              <LevelNotesTestsStrip
+                                level="subtopic"
+                                label={subName}
+                                completeNote={subNotes.completeNote}
+                                shortNote={subNotes.shortNote}
+                                tests={subTests}
+                                attempts={testAttempts}
+                                compact
+                                onOpenNotes={(noteType) =>
+                                  openNotesModal(
+                                    'subtopic',
+                                    subId,
+                                    [activeSubject.name, topic.title, subName],
+                                    noteType
+                                  )
+                                }
+                                onLaunchTest={(test) =>
+                                  setActiveTestModal({
+                                    test,
+                                    breadcrumbs: [activeSubject.name, topic.title, subName],
+                                  })
+                                }
+                                onOpenStudio={() => setActiveView('ContentStudio')}
+                              />
+                            </div>
+                          );
+                        })()}
                     </div>
 
                     {/* Mathematical Formulas */}
@@ -890,6 +1146,25 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
         defaultSubtopicTitle={addResourceTargetSubtopic}
         onSaveResource={handleSaveResource}
       />
+
+      {/* DEDICATED SANDBOXED HTML NOTES VIEWER MODAL */}
+      <HtmlNotesViewerModal
+        isOpen={notesViewerState.isOpen}
+        onClose={() => setNotesViewerState((prev) => ({ ...prev, isOpen: false }))}
+        breadcrumbs={notesViewerState.breadcrumbs}
+        completeNote={notesViewerState.completeNote}
+        shortNote={notesViewerState.shortNote}
+        initialNoteType={notesViewerState.initialNoteType}
+      />
+
+      {/* TIMED QUIZ RUNNER & REVIEW MODAL */}
+      <TestRunnerModal
+        isOpen={Boolean(activeTestModal)}
+        onClose={() => setActiveTestModal(null)}
+        test={activeTestModal?.test || null}
+        breadcrumbs={activeTestModal?.breadcrumbs || []}
+      />
+
       {syllabusEntryModal}
     </div>
   );

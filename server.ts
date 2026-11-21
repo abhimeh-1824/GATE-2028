@@ -439,6 +439,81 @@ app.delete(
   }
 );
 
+// ============================================================================
+// Hierarchical Notes & Test Management Server Validation Endpoints
+// (In-memory processing only — no uploaded files persisted to disk)
+// ============================================================================
+app.post(
+  '/api/notes/validate',
+  apiRateLimiter,
+  verifySupabaseJwt,
+  (req: AuthenticatedRequest, res: Response) => {
+    const { entityType, entityId, noteType, title, htmlContent } = req.body || {};
+    if (!['subject', 'topic', 'subtopic'].includes(entityType)) {
+      return res.status(400).json({ success: false, error: 'entityType must be subject, topic, or subtopic.' });
+    }
+    if (!['complete', 'short'].includes(noteType)) {
+      return res.status(400).json({ success: false, error: 'noteType must be complete or short.' });
+    }
+    if (!entityId || typeof entityId !== 'string') {
+      return res.status(400).json({ success: false, error: 'Valid entityId is required.' });
+    }
+    if (!htmlContent || typeof htmlContent !== 'string' || !htmlContent.trim()) {
+      return res.status(400).json({ success: false, error: 'HTML content cannot be empty.' });
+    }
+    if (Buffer.byteLength(htmlContent, 'utf8') > 2 * 1024 * 1024) {
+      return res.status(413).json({ success: false, error: 'HTML note exceeds 2 MB maximum size.' });
+    }
+    return res.status(200).json({
+      success: true,
+      validatedBy: req.verifiedUserId,
+      title: typeof title === 'string' && title.trim() ? title.trim() : `${noteType} notes`,
+      byteLength: Buffer.byteLength(htmlContent, 'utf8'),
+    });
+  }
+);
+
+app.post(
+  '/api/tests/validate-questions',
+  apiRateLimiter,
+  verifySupabaseJwt,
+  (req: AuthenticatedRequest, res: Response) => {
+    const questions = req.body?.questions;
+    if (!Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ success: false, error: 'questions array must be non-empty.' });
+    }
+    if (questions.length > 500) {
+      return res.status(400).json({ success: false, error: 'Maximum 500 questions per import batch.' });
+    }
+    const invalidIndices: number[] = [];
+    questions.forEach((q: any, idx: number) => {
+      const validAns = ['A', 'B', 'C', 'D'].includes(String(q?.correctAnswer || '').toUpperCase());
+      if (
+        !q?.questionText ||
+        !q?.optionA ||
+        !q?.optionB ||
+        !q?.optionC ||
+        !q?.optionD ||
+        !validAns
+      ) {
+        invalidIndices.push(idx + 1);
+      }
+    });
+    if (invalidIndices.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Validation failed on question rows: ${invalidIndices.join(', ')}`,
+        invalidIndices,
+      });
+    }
+    return res.status(200).json({
+      success: true,
+      validatedCount: questions.length,
+      validatedBy: req.verifiedUserId,
+    });
+  }
+);
+
 // Serve static assets from dist
 const distPath = path.join(__dirname, 'dist');
 

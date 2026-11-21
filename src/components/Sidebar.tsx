@@ -18,6 +18,7 @@ import {
   Compass,
   HelpCircle,
   X,
+  FileCode2,
 } from 'lucide-react';
 import { useStudy } from '../context/StudyContext';
 import { soundManager } from '../utils/audio';
@@ -47,6 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     daysRemaining,
     settings,
     currentUser,
+    canManageContent,
     resetToDefaults,
   } = useStudy();
   const [soundEnabled, setSoundEnabled] = React.useState(soundManager.isEnabled());
@@ -89,10 +91,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'Subjects',
-      label: 'Subjects & Video/PDFs',
+      label: 'Subjects & Notes',
       icon: BookOpen,
-      badge: 'PDFs & Lectures',
+      badge: 'Notes & Tests',
       badgeColor: 'text-indigo-700 bg-indigo-50 font-mono font-bold',
+    },
+    {
+      id: 'ContentStudio',
+      label: 'Notes & Tests Studio',
+      icon: FileCode2,
+      badge: canManageContent ? 'Admin/CMS' : 'Add Tests',
+      badgeColor: canManageContent
+        ? 'text-emerald-700 bg-emerald-50 font-mono font-bold'
+        : 'text-indigo-700 bg-indigo-50 font-mono',
     },
     {
       id: 'Roadmap',
