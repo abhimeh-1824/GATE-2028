@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { getAppUrl } from './appUrl';
 import {
   AuthUser,
   Task,
@@ -84,6 +85,7 @@ export async function signUpUser(
       email,
       password,
       options: {
+        emailRedirectTo: getAppUrl('/'),
         data: {
           full_name: fullName,
           target_air: targetAir,
@@ -609,11 +611,11 @@ export async function fetchSyllabusFromDatabase(ownerId: string): Promise<Syllab
 
   const [subjectResult, topicResult, subtopicResult] = await Promise.all([
     supabase.from('subjects').select('id, owner_id, name, code, sort_order')
-      .eq('owner_id', ownerId).order('sort_order', { ascending: true }),
+      .order('sort_order', { ascending: true }),
     supabase.from('topics').select('id, owner_id, subject_id, name, sort_order, average_score, score, confidence_score, pyq_accuracy, accuracy, status, weightage_tier, pyqs_solved, pyqs_total')
-      .eq('owner_id', ownerId).order('sort_order', { ascending: true }),
+      .order('sort_order', { ascending: true }),
     supabase.from('subtopics').select('id, owner_id, topic_id, name, sort_order')
-      .eq('owner_id', ownerId).order('sort_order', { ascending: true }),
+      .order('sort_order', { ascending: true }),
   ]);
 
   const queryError = subjectResult.error || topicResult.error || subtopicResult.error;

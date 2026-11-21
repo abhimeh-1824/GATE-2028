@@ -203,22 +203,64 @@ ALTER TABLE public.chat_group_reports ENABLE ROW LEVEL SECURITY;
 
 -- Users can create and manage only their own subject tree.
 DROP POLICY IF EXISTS subjects_owner_access ON public.subjects;
-CREATE POLICY subjects_owner_access ON public.subjects
+DROP POLICY IF EXISTS subjects_select_all_auth ON public.subjects;
+CREATE POLICY subjects_select_all_auth ON public.subjects
+  FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS subjects_manage_content_roles ON public.subjects;
+CREATE POLICY subjects_manage_content_roles ON public.subjects
   FOR ALL TO authenticated
-  USING (owner_id = (SELECT auth.uid()))
-  WITH CHECK (owner_id = (SELECT auth.uid()));
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.profiles
+      WHERE id = auth.uid() AND role IN ('admin', 'content_manager')
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.profiles
+      WHERE id = auth.uid() AND role IN ('admin', 'content_manager')
+    )
+  );
 
 DROP POLICY IF EXISTS topics_owner_access ON public.topics;
-CREATE POLICY topics_owner_access ON public.topics
+DROP POLICY IF EXISTS topics_select_all_auth ON public.topics;
+CREATE POLICY topics_select_all_auth ON public.topics
+  FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS topics_manage_content_roles ON public.topics;
+CREATE POLICY topics_manage_content_roles ON public.topics
   FOR ALL TO authenticated
-  USING (owner_id = (SELECT auth.uid()))
-  WITH CHECK (owner_id = (SELECT auth.uid()));
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.profiles
+      WHERE id = auth.uid() AND role IN ('admin', 'content_manager')
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.profiles
+      WHERE id = auth.uid() AND role IN ('admin', 'content_manager')
+    )
+  );
 
 DROP POLICY IF EXISTS subtopics_owner_access ON public.subtopics;
-CREATE POLICY subtopics_owner_access ON public.subtopics
+DROP POLICY IF EXISTS subtopics_select_all_auth ON public.subtopics;
+CREATE POLICY subtopics_select_all_auth ON public.subtopics
+  FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS subtopics_manage_content_roles ON public.subtopics;
+CREATE POLICY subtopics_manage_content_roles ON public.subtopics
   FOR ALL TO authenticated
-  USING (owner_id = (SELECT auth.uid()))
-  WITH CHECK (owner_id = (SELECT auth.uid()));
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.profiles
+      WHERE id = auth.uid() AND role IN ('admin', 'content_manager')
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.profiles
+      WHERE id = auth.uid() AND role IN ('admin', 'content_manager')
+    )
+  );
 
 -- Peer comparison reads profile names/IDs; profile writes remain self-only.
 DROP POLICY IF EXISTS profiles_read_authenticated ON public.profiles;

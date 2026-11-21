@@ -210,9 +210,11 @@ const MainAppContent: React.FC = () => {
 
           {activeView === 'Chat' && <ChatView />}
 
+          {/* Prep Guide temporarily disabled.
           {activeView === 'Guide' && (
             <GuideView onOpenTour={() => setIsTourOpen(true)} />
           )}
+          */}
         </main>
       </div>
       </div>
@@ -225,6 +227,7 @@ const MainAppContent: React.FC = () => {
         onOpenFormula={handleOpenFormula}
       />
 
+      {/* Formula & Traps Vault temporarily disabled.
       <FormulaVaultModal
         isOpen={isFormulaVaultOpen}
         onClose={() => {
@@ -233,6 +236,7 @@ const MainAppContent: React.FC = () => {
         }}
         selectedFormulaId={selectedFormulaId}
       />
+      */}
 
       <AddTaskModal
         isOpen={isAddTaskOpen}

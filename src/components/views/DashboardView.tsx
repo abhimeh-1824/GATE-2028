@@ -197,7 +197,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <section>
         <NeedsRevisionWidget
           onSelectSubject={onSelectSubject}
-          onOpenFormulaVault={onOpenFormulaVault}
         />
       </section>
 

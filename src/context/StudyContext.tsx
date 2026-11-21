@@ -1455,7 +1455,12 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setStudyNotes(notesRes.data);
       setLevelTests(testsRes.data);
       setTestAttempts(attemptsRes.data);
-      const notice = notesRes.error || testsRes.error || attemptsRes.error || null;
+
+      const usingLocalFallback =
+        notesRes.usingLocalFallback || testsRes.usingLocalFallback || attemptsRes.usingLocalFallback;
+      const notice = usingLocalFallback
+        ? null
+        : notesRes.error || testsRes.error || attemptsRes.error || null;
       setNotesTestsNotice(notice);
     } catch (err) {
       console.warn('Error loading hierarchical notes & tests:', err);

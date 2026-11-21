@@ -297,6 +297,7 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
               <Plus className="w-3.5 h-3.5" />
               <span>Add Subject</span>
             </button>
+            {/* Formula Vault temporarily disabled.
             <button
               onClick={onOpenFormulaVault}
               className="px-3.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -304,6 +305,7 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
               <Sigma className="w-3.5 h-3.5" />
               <span>KaTeX Formula Vault</span>
             </button>
+            */}
           </div>
         </div>
       </section>
@@ -664,6 +666,7 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
             ))}
           </div>
 
+          {/* Formula Vault temporarily disabled.
           <button
             onClick={onOpenFormulaVault}
             className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition-colors"
@@ -671,6 +674,7 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
             <Sigma className="w-4 h-4" />
             <span>Open Formula Vault &rarr;</span>
           </button>
+          */}
         </div>
 
         {/* Topic Accordion Cards */}

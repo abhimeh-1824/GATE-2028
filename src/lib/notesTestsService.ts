@@ -176,7 +176,7 @@ export async function fetchAllStudyNotes(isDemo?: boolean): Promise<ServiceResul
       return {
         data: readLocal<StudyNote[]>(LOCAL_NOTES_KEY, []),
         usingLocalFallback: true,
-        error: 'Database migration pending for study_notes; using local workspace storage.',
+        error: 'Study notes are available in local workspace storage.',
       };
     }
     return { data: [], error: error.message };
@@ -336,7 +336,7 @@ export async function fetchAllLevelTests(isDemo?: boolean): Promise<ServiceResul
       return {
         data: tests.map((t) => ({ ...t, questionCount: countMap.get(t.id) || 0 })),
         usingLocalFallback: true,
-        error: 'Database migration pending for level_tests; using local workspace storage.',
+        error: 'Level tests are available in local workspace storage.',
       };
     }
     return { data: [], error: error.message };

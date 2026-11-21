@@ -839,13 +839,9 @@ export const ContentStudioView: React.FC = () => {
 
       {/* Notice / Feedback Banners */}
       {notesTestsNotice && (
-        <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2.5">
-          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-          <div>
-            <span className="font-semibold">Local Sandbox Fallback Active: </span>
-            {notesTestsNotice} Run the non-destructive SQL migration file in Supabase SQL Editor to
-            enable multi-user cloud persistence.
-          </div>
+        <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 flex items-start gap-2.5">
+          <AlertTriangle className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+          <div>{notesTestsNotice}</div>
         </div>
       )}
 

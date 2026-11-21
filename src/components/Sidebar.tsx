@@ -139,13 +139,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: MessageCircle,
       badge: null,
     },
-    {
-      id: 'Guide',
-      label: 'Prep Guide & Strategy',
-      icon: Compass,
-      badge: 'Handbook',
-      badgeColor: 'text-emerald-700 bg-emerald-50 font-bold',
-    },
+    // Prep Guide temporarily disabled.
+    // {
+    //   id: 'Guide',
+    //   label: 'Prep Guide & Strategy',
+    //   icon: Compass,
+    //   badge: 'Handbook',
+    //   badgeColor: 'text-emerald-700 bg-emerald-50 font-bold',
+    // },
   ];
 
   const handleNavClick = (viewId: string) => {
@@ -240,6 +241,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           Quick Tools
         </div>
 
+        {/* Formula & Traps Vault temporarily disabled.
         <button
           onClick={() => {
             onOpenFormulaVault();
@@ -250,6 +252,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <BookMarked className="w-4 h-4 text-slate-400" />
           <span>Formula &amp; Traps Vault</span>
         </button>
+        */}
 
         <button
           onClick={() => {
@@ -262,6 +265,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <span>AIR Goals &amp; Config</span>
         </button>
 
+        {/* Account Sign In temporarily disabled in sidebar.
         <button
           onClick={() => {
             onOpenAuthModal();
@@ -274,6 +278,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span>{currentUser ? 'Account Sign In' : 'Sign In / Register'}</span>
           </div>
         </button>
+        */}
 
         {onOpenTour && (
           <button
@@ -311,7 +316,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* User Card & Controls */}
+        {/* User Card & Account Controls temporarily disabled in sidebar.
         <div className="flex items-center justify-between pt-0.5">
           <div
             onClick={() => {
@@ -356,6 +361,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </div>
         </div>
+        */}
       </div>
     </>
   );

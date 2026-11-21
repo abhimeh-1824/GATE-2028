@@ -238,6 +238,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                   </button>
                 )}
 
+                {/* Prep Guide temporarily disabled.
                 <button
                   onClick={() => {
                     setIsProfileMenuOpen(false);
@@ -248,6 +249,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                   <Compass className="w-4 h-4 text-indigo-600" />
                   <span>Preparation Guide &amp; Blueprint</span>
                 </button>
+                */}
 
                 <button
                   onClick={() => {
