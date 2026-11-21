@@ -10,9 +10,9 @@ import {
 } from '../types';
 import { createFreshZeroSubjects } from '../data/gateDaSyllabus';
 import { supabase } from './supabase';
-import { getSavedAccounts, getDeterministicUuid } from './supabaseService';
+import { getDeterministicUuid } from './supabaseService';
+import { loadUserStudyState } from './userStudyStateService';
 
-const USER_DATA_PREFIX = 'gateda_2028_user_';
 
 /**
  * Computes a standardized progress profile for any real user from their subject & study records.
@@ -269,18 +269,20 @@ export async function getAllPeerProfilesFromDatabase(
           // Only show peer if they have genuine progress records in Supabase database
           if (!studentsWithProgress.has(remote.id)) continue;
 
-          // Load their isolated user progress
-          const savedSubjectsRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_subjects`);
-          const savedHoursRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_baseHours`);
-          const savedMocksRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_mockTests`);
-          const savedSettingsRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_settings`);
+          // Load their isolated user progress from Supabase.
+          const cloudState = await loadUserStudyState(remote.id);
 
-          // Strictly use real progress or zero baseline — never substitute demo data
-          const pSubjects: Subject[] = savedSubjectsRaw ? JSON.parse(savedSubjectsRaw) : createFreshZeroSubjects();
-          const pHours: number = savedHoursRaw ? Number(savedHoursRaw) : 0;
-          const pMocks: MockTest[] = savedMocksRaw ? JSON.parse(savedMocksRaw) : [];
-          const pSettings: UserSettings = savedSettingsRaw
-            ? JSON.parse(savedSettingsRaw)
+          const pSubjects: Subject[] = Array.isArray(cloudState.state?.subjects)
+            ? cloudState.state.subjects as Subject[]
+            : createFreshZeroSubjects();
+          const pHours: number = typeof cloudState.state?.baseLoggedHours === 'number'
+            ? cloudState.state.baseLoggedHours
+            : 0;
+          const pMocks: MockTest[] = Array.isArray(cloudState.state?.mockTests)
+            ? cloudState.state.mockTests as MockTest[]
+            : [];
+          const pSettings: UserSettings = cloudState.state?.settings && typeof cloudState.state.settings === 'object'
+            ? cloudState.state.settings as UserSettings
             : {
                 targetAir: 10,
                 targetCollege: 'IISc Bangalore',
@@ -330,62 +332,7 @@ export async function getAllPeerProfilesFromDatabase(
     dbMessage = 'Offline / Local database mode';
   }
 
-  // 3. Include any other verified registered accounts on this system that have opted in
-  try {
-    const localAccounts = getSavedAccounts();
-    for (const acc of localAccounts) {
-      if (acc.id === currentUser?.id || acc.id.startsWith('demo_') || acc.isDemo) {
-        continue;
-      }
-      if (profilesMap.has(acc.id)) continue;
-
-      const savedSettingsRaw = localStorage.getItem(`${USER_DATA_PREFIX}${acc.id}_settings`);
-      if (savedSettingsRaw) {
-        const parsedSettings = JSON.parse(savedSettingsRaw);
-        if (parsedSettings.shareProgressWithCohort === false) {
-          continue;
-        }
-      }
-
-      const savedSubjectsRaw = localStorage.getItem(`${USER_DATA_PREFIX}${acc.id}_subjects`);
-      const savedHoursRaw = localStorage.getItem(`${USER_DATA_PREFIX}${acc.id}_baseHours`);
-      const savedMocksRaw = localStorage.getItem(`${USER_DATA_PREFIX}${acc.id}_mockTests`);
-
-      const pSubjects: Subject[] = savedSubjectsRaw ? JSON.parse(savedSubjectsRaw) : createFreshZeroSubjects();
-      const pHours: number = savedHoursRaw ? Number(savedHoursRaw) : 0;
-      const pMocks: MockTest[] = savedMocksRaw ? JSON.parse(savedMocksRaw) : [];
-      const pSettings: UserSettings = savedSettingsRaw
-        ? JSON.parse(savedSettingsRaw)
-        : {
-            targetAir: acc.targetAir || 20,
-            targetCollege: acc.targetCollege || 'IIT Bombay',
-            targetYear: 2028,
-            examDate: '2028-02-12',
-            dailyGoalHours: 4,
-            weeklyGoalHours: 25,
-            streakCount: 1,
-            userName: acc.fullName,
-            shareProgressWithCohort: true,
-          };
-
-      const peerUser: AuthUser = {
-        ...acc,
-        email: '', // Never expose peer email
-      };
-
-      const peerProf = computeUserProgressProfile(
-        peerUser,
-        pSubjects,
-        pHours,
-        pMocks,
-        pSettings,
-        false
-      );
-      profilesMap.set(acc.id, peerProf);
-    }
-  } catch (e) {
-    console.warn('Could not read saved accounts:', e);
-  }
+  // 3. Peer profiles are sourced only from Supabase; browser account caches are not used.
 
   const profilesList = Array.from(profilesMap.values()).sort(
     (a, b) => b.syllabusPercent - a.syllabusPercent

@@ -480,6 +480,29 @@ ALTER TABLE public.level_tests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.test_questions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.test_attempts ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS study_notes_select_auth ON public.study_notes;
+CREATE POLICY study_notes_select_auth ON public.study_notes
+  FOR SELECT TO authenticated USING (true);
+
+DROP POLICY IF EXISTS study_notes_insert_owner ON public.study_notes;
+CREATE POLICY study_notes_insert_owner ON public.study_notes
+  FOR INSERT TO authenticated
+  WITH CHECK (owner_id = auth.uid() AND updated_by = auth.uid());
+
+DROP POLICY IF EXISTS study_notes_update_owner_or_manager ON public.study_notes;
+CREATE POLICY study_notes_update_owner_or_manager ON public.study_notes
+  FOR UPDATE TO authenticated
+  USING (owner_id = auth.uid() OR public.is_content_manager_or_admin())
+  WITH CHECK (
+    (owner_id = auth.uid() AND updated_by = auth.uid())
+    OR public.is_content_manager_or_admin()
+  );
+
+DROP POLICY IF EXISTS study_notes_delete_owner_or_manager ON public.study_notes;
+CREATE POLICY study_notes_delete_owner_or_manager ON public.study_notes
+  FOR DELETE TO authenticated
+  USING (owner_id = auth.uid() OR public.is_content_manager_or_admin());
+
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.study_notes, public.level_tests, public.test_questions, public.test_attempts TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.chat_get_my_chat_id()

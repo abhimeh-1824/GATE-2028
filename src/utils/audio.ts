@@ -8,11 +8,7 @@ class AudioSynthesizer {
   private soundEnabled: boolean = true;
 
   constructor() {
-    // Sound is enabled by default, user can toggle
-    const saved = localStorage.getItem('gate_sound_enabled');
-    if (saved !== null) {
-      this.soundEnabled = saved === 'true';
-    }
+    // Sound preference remains session-only and is not persisted in browser storage.
   }
 
   private getContext(): AudioContext | null {
@@ -35,7 +31,6 @@ class AudioSynthesizer {
 
   public setEnabled(enabled: boolean): void {
     this.soundEnabled = enabled;
-    localStorage.setItem('gate_sound_enabled', String(enabled));
   }
 
   /**

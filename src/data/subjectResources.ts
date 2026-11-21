@@ -1,4 +1,5 @@
 import { StudyResource, SubjectId } from '../types';
+import { supabase } from '../lib/supabase';
 
 /**
  * Authoritative GATE DA 2028 Study Resources:
@@ -644,56 +645,46 @@ export const DEFAULT_TOPIC_RESOURCES: Record<string, StudyResource[]> = {
   ],
 };
 
-const USER_CUSTOM_RESOURCES_KEY = 'gateda_2028_custom_resources_';
+export async function loadCustomResources(userId: string): Promise<Record<string, StudyResource[]>> {
+  const { data, error } = await supabase
+    .from('user_custom_resources')
+    .select('target_id, resource_json')
+    .eq('user_id', userId);
 
-/**
- * Loads custom resources added by a specific user from localStorage.
- */
-export function getSavedCustomResources(userId: string): Record<string, StudyResource[]> {
-  try {
-    const raw = localStorage.getItem(`${USER_CUSTOM_RESOURCES_KEY}${userId}`);
-    if (!raw) return {};
-    return JSON.parse(raw);
-  } catch {
-    return {};
+  if (error || !data) return {};
+  const result: Record<string, StudyResource[]> = {};
+  for (const row of data) {
+    const targetId = String(row.target_id);
+    result[targetId] = [...(result[targetId] || []), row.resource_json as StudyResource];
   }
+  return result;
 }
 
-/**
- * Saves a user-added custom resource (book PDF or video link) to persistent storage.
- */
-export function saveCustomResource(
+export async function saveCustomResourceToCloud(
   userId: string,
-  targetId: string, // subjectId or topicId
+  targetId: string,
   resource: StudyResource
-): Record<string, StudyResource[]> {
-  try {
-    const existing = getSavedCustomResources(userId);
-    const list = existing[targetId] || [];
-    existing[targetId] = [...list, resource];
-    localStorage.setItem(`${USER_CUSTOM_RESOURCES_KEY}${userId}`, JSON.stringify(existing));
-    return existing;
-  } catch {
-    return {};
-  }
+): Promise<boolean> {
+  const { error } = await supabase.from('user_custom_resources').upsert({
+    id: resource.id,
+    user_id: userId,
+    target_id: targetId,
+    resource_json: resource,
+  });
+  return !error;
 }
 
-/**
- * Deletes a user custom resource.
- */
-export function deleteCustomResource(
+export async function deleteCustomResourceFromCloud(
   userId: string,
   targetId: string,
   resourceId: string
-): Record<string, StudyResource[]> {
-  try {
-    const existing = getSavedCustomResources(userId);
-    if (existing[targetId]) {
-      existing[targetId] = existing[targetId].filter((r) => r.id !== resourceId);
-      localStorage.setItem(`${USER_CUSTOM_RESOURCES_KEY}${userId}`, JSON.stringify(existing));
-    }
-    return existing;
-  } catch {
-    return {};
-  }
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('user_custom_resources')
+    .delete()
+    .eq('user_id', userId)
+    .eq('target_id', targetId)
+    .eq('id', resourceId);
+  return !error;
 }
+

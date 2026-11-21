@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   BookOpen,
   CheckCircle2,
@@ -42,9 +42,9 @@ import {
 import {
   DEFAULT_SUBJECT_RESOURCES,
   DEFAULT_TOPIC_RESOURCES,
-  getSavedCustomResources,
-  saveCustomResource,
-  deleteCustomResource,
+  loadCustomResources,
+  saveCustomResourceToCloud,
+  deleteCustomResourceFromCloud,
 } from '../../data/subjectResources';
 import { ResourceViewerModal } from '../modals/ResourceViewerModal';
 import { AddResourceModal } from '../modals/AddResourceModal';
@@ -52,6 +52,7 @@ import { SyllabusEntryModal, SyllabusEntryTarget } from '../modals/SyllabusEntry
 import { HtmlNotesViewerModal } from '../modals/HtmlNotesViewerModal';
 import { TestRunnerModal } from '../modals/TestRunnerModal';
 import { LevelNotesTestsStrip } from '../common/LevelNotesTestsStrip';
+import { getDeterministicUuid } from '../../lib/supabaseService';
 
 interface SubjectsViewProps {
   initialSubjectId?: SubjectId;
@@ -117,9 +118,16 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
 
   // Custom User Resources
   const userId = currentUser?.id || 'guest_user';
-  const [customResourcesMap, setCustomResourcesMap] = useState<Record<string, StudyResource[]>>(() =>
-    getSavedCustomResources(userId)
-  );
+  const [customResourcesMap, setCustomResourcesMap] = useState<Record<string, StudyResource[]>>({});
+
+  useEffect(() => {
+    if (!currentUser) {
+      setCustomResourcesMap({});
+      return;
+    }
+
+    void loadCustomResources(currentUser.id).then(setCustomResourcesMap);
+  }, [currentUser?.id]);
 
   const activeSubject = subjects.find((s) => s.id === activeSubjectId) || subjects[0];
 
@@ -202,16 +210,28 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
     .filter((r) => r.type === 'video_tutorial').length;
 
   // Handler for adding custom resource
-  const handleSaveResource = (targetId: string, resource: StudyResource) => {
-    const updated = saveCustomResource(userId, targetId, resource);
-    setCustomResourcesMap(updated);
+  const handleSaveResource = async (targetId: string, resource: StudyResource) => {
+    if (!currentUser) return;
+    const saved = await saveCustomResourceToCloud(currentUser.id, targetId, resource);
+    if (saved) {
+      setCustomResourcesMap((prev) => ({
+        ...prev,
+        [targetId]: [...(prev[targetId] || []), resource],
+      }));
+    }
   };
 
   // Handler for deleting custom resource
-  const handleDeleteCustomResource = (targetId: string, resourceId: string, e: React.MouseEvent) => {
+  const handleDeleteCustomResource = async (targetId: string, resourceId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const updated = deleteCustomResource(userId, targetId, resourceId);
-    setCustomResourcesMap(updated);
+    if (!currentUser) return;
+    const deleted = await deleteCustomResourceFromCloud(currentUser.id, targetId, resourceId);
+    if (deleted) {
+      setCustomResourcesMap((prev) => ({
+        ...prev,
+        [targetId]: (prev[targetId] || []).filter((resource) => resource.id !== resourceId),
+      }));
+    }
   };
 
   const openSyllabusEntry = (target: SyllabusEntryTarget) => {
@@ -956,8 +976,10 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
                           const matchingResource = allTopicResources.find(
                             (r) => r.subtopicTitle?.toLowerCase() === sub.toLowerCase()
                           );
-                          const subtopicId =
-                            topic.subtopicItems?.[idx]?.id || `${topic.id}::sub_${idx}`;
+                          const candidateSubtopicId = topic.subtopicItems?.[idx]?.id;
+                          const subtopicId = candidateSubtopicId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidateSubtopicId)
+                            ? candidateSubtopicId
+                            : getDeterministicUuid(`subtop_${topic.id}_${idx}`);
                           const subNotes = getLevelNotes('subtopic', subtopicId);
                           const subTests = getLevelTests('subtopic', subtopicId).filter(
                             (t) => t.isActive
@@ -1039,8 +1061,10 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
                         (() => {
                           const subIdx = activeSubtopicSelection.index;
                           const subName = topic.subtopics[subIdx];
-                          const subId =
-                            topic.subtopicItems?.[subIdx]?.id || `${topic.id}::sub_${subIdx}`;
+                          const candidateSubId = topic.subtopicItems?.[subIdx]?.id;
+                          const subId = candidateSubId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidateSubId)
+                            ? candidateSubId
+                            : getDeterministicUuid(`subtop_${topic.id}_${subIdx}`);
                           const subNotes = getLevelNotes('subtopic', subId);
                           const subTests = getLevelTests('subtopic', subId);
                           return (

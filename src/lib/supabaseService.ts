@@ -36,38 +36,22 @@ export interface TopicNeedingRevision {
 }
 
 // Key for storing registered users list locally for quick switching
-const ACCOUNTS_STORAGE_KEY = 'gate_da_registered_accounts';
-const ACTIVE_USER_KEY = 'gate_da_active_user_id';
+let inMemoryAccounts: AuthUser[] = [];
+let inMemoryActiveUserId: string | null = null;
 
-export const getSavedAccounts = (): AuthUser[] => {
-  try {
-    const raw = localStorage.getItem(ACCOUNTS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (e) {
-    return [];
-  }
-};
+export const getSavedAccounts = (): AuthUser[] => inMemoryAccounts;
 
 export const saveAccountLocally = (user: AuthUser) => {
-  try {
-    const accounts = getSavedAccounts().filter((a) => a.id !== user.id && a.email !== user.email);
-    accounts.push(user);
-    localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(accounts));
-  } catch (e) {
-    console.error('Error saving account locally', e);
-  }
+  inMemoryAccounts = [
+    ...inMemoryAccounts.filter((account) => account.id !== user.id && account.email !== user.email),
+    user,
+  ];
 };
 
-export const getActiveUserId = (): string | null => {
-  return localStorage.getItem(ACTIVE_USER_KEY);
-};
+export const getActiveUserId = (): string | null => inMemoryActiveUserId;
 
 export const setActiveUserId = (userId: string | null) => {
-  if (userId) {
-    localStorage.setItem(ACTIVE_USER_KEY, userId);
-  } else {
-    localStorage.removeItem(ACTIVE_USER_KEY);
-  }
+  inMemoryActiveUserId = userId;
 };
 
 /**

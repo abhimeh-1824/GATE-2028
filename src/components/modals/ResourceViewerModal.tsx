@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { StudyResource } from '../../types';
+import { loadResourceNote, saveResourceNote } from '../../lib/userStudyStateService';
 import { useStudy } from '../../context/StudyContext';
 import {
   X,
@@ -30,22 +31,19 @@ export const ResourceViewerModal: React.FC<ResourceViewerModalProps> = ({
 }) => {
   const { currentUser } = useStudy();
   const userId = currentUser?.id || 'demo_user';
-
   const [copied, setCopied] = useState(false);
   const [personalNotes, setPersonalNotes] = useState('');
   const [hasSaved, setHasSaved] = useState(false);
 
-  // Load existing notes for this resource & user
+  // Load existing notes for this resource & user from Supabase.
   useEffect(() => {
-    if (resource?.id) {
-      try {
-        const saved = localStorage.getItem(`gate_resource_notes_${userId}_${resource.id}`);
-        setPersonalNotes(saved || '');
-      } catch {
-        setPersonalNotes('');
-      }
+    if (!resource?.id || !currentUser) {
+      setPersonalNotes('');
+      return;
     }
-  }, [resource?.id, userId]);
+
+    void loadResourceNote(currentUser.id, resource.id).then(setPersonalNotes);
+  }, [resource?.id, currentUser?.id]);
 
   // Handle Escape key
   useEffect(() => {
@@ -61,15 +59,13 @@ export const ResourceViewerModal: React.FC<ResourceViewerModalProps> = ({
 
   const handleNotesChange = (text: string) => {
     setPersonalNotes(text);
-    if (resource?.id) {
-      try {
-        localStorage.setItem(`gate_resource_notes_${userId}_${resource.id}`, text);
-        setHasSaved(true);
-        setTimeout(() => setHasSaved(false), 1500);
-      } catch (err) {
-        console.warn('Could not save note to localStorage', err);
-      }
-    }
+  };
+
+  const handleSaveResourceNote = async () => {
+    if (!currentUser || !resource?.id) return;
+    await saveResourceNote(currentUser.id, resource.id, personalNotes);
+    setHasSaved(true);
+    setTimeout(() => setHasSaved(false), 1500);
   };
 
   if (!isOpen || !resource) return null;
@@ -271,7 +267,7 @@ export const ResourceViewerModal: React.FC<ResourceViewerModalProps> = ({
                 <span>Lecture Notes / Key Formulas From This Resource:</span>
               </label>
               <span className={`text-[10px] font-mono transition-colors ${hasSaved ? 'text-emerald-600 font-bold' : 'text-slate-400'}`}>
-                {hasSaved ? 'Saved locally ✓' : 'Auto-saved to your profile'}
+                {hasSaved ? 'Saved to Supabase ✓' : 'Cloud study note'}
               </span>
             </div>
             <textarea
@@ -281,6 +277,15 @@ export const ResourceViewerModal: React.FC<ResourceViewerModalProps> = ({
               placeholder="e.g. At 14:20 Strang proves dim(Col(A)) = dim(Row(A)). Key theorem for GATE DA questions..."
               className="w-full p-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-sans"
             />
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleSaveResourceNote}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold"
+              >
+                Save to Database
+              </button>
+            </div>
           </div>
         </div>
 

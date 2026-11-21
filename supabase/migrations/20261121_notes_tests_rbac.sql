@@ -203,23 +203,43 @@ alter table public.level_tests enable row level security;
 alter table public.test_questions enable row level security;
 alter table public.test_attempts enable row level security;
 
--- study_notes: All authenticated users can read; content_manager & admin can write/update/delete
+-- study_notes: All authenticated users can read; users can manage notes they own; content_manager & admin can manage all.
 drop policy if exists "study_notes_select_auth" on public.study_notes;
 create policy "study_notes_select_auth" on public.study_notes
   for select using (auth.role() = 'authenticated');
 
 drop policy if exists "study_notes_insert_content_roles" on public.study_notes;
-create policy "study_notes_insert_content_roles" on public.study_notes
-  for insert with check (public.is_content_manager_or_admin());
+drop policy if exists "study_notes_insert_owner" on public.study_notes;
+create policy "study_notes_insert_owner" on public.study_notes
+  for insert
+  with check (
+    owner_id = auth.uid()
+    and updated_by = auth.uid()
+  );
 
 drop policy if exists "study_notes_update_content_roles" on public.study_notes;
-create policy "study_notes_update_content_roles" on public.study_notes
-  for update using (public.is_content_manager_or_admin())
-  with check (public.is_content_manager_or_admin());
+drop policy if exists "study_notes_update_owner_or_manager" on public.study_notes;
+create policy "study_notes_update_owner_or_manager" on public.study_notes
+  for update
+  using (
+    owner_id = auth.uid()
+    or public.is_content_manager_or_admin()
+  )
+  with check (
+    (
+      owner_id = auth.uid()
+      and updated_by = auth.uid()
+    )
+    or public.is_content_manager_or_admin()
+  );
 
 drop policy if exists "study_notes_delete_content_roles" on public.study_notes;
-create policy "study_notes_delete_content_roles" on public.study_notes
-  for delete using (public.is_content_manager_or_admin());
+drop policy if exists "study_notes_delete_owner_or_manager" on public.study_notes;
+create policy "study_notes_delete_owner_or_manager" on public.study_notes
+  for delete using (
+    owner_id = auth.uid()
+    or public.is_content_manager_or_admin()
+  );
 
 -- level_tests: All authenticated users can view active tests (or their own inactive tests, or admin all)
 -- Any authenticated user can create tests; owner or admin can update/delete

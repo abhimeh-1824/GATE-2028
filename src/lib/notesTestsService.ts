@@ -24,21 +24,14 @@ export interface ServiceResult<T> {
   usingLocalFallback?: boolean;
 }
 
+const inMemoryLocalState = new Map<string, unknown>();
+
 function readLocal<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
+  return (inMemoryLocalState.get(key) as T | undefined) || fallback;
 }
 
 function writeLocal<T>(key: string, value: T): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (err) {
-    console.warn('Local storage write notice:', err);
-  }
+  inMemoryLocalState.set(key, value);
 }
 
 function generateId(): string {
@@ -183,6 +176,50 @@ export async function fetchAllStudyNotes(isDemo?: boolean): Promise<ServiceResul
   }
 
   return { data: (data || []).map(mapDbNote) };
+}
+
+export async function syncLocalStudyNotesToCloud(isDemo?: boolean): Promise<ServiceResult<number>> {
+  const { live, userId } = await hasLiveSupabaseSession(isDemo);
+  if (!live || !userId) {
+    return { data: 0, usingLocalFallback: true };
+  }
+
+  const localNotes = readLocal<StudyNote[]>(LOCAL_NOTES_KEY, []);
+  let syncedCount = 0;
+
+  for (const note of localNotes) {
+    if (
+      !UUID_REGEX.test(note.entityId) ||
+      !UUID_REGEX.test(note.subjectId) ||
+      (note.topicId && !UUID_REGEX.test(note.topicId)) ||
+      (note.subtopicId && !UUID_REGEX.test(note.subtopicId))
+    ) {
+      continue;
+    }
+
+    const payload = {
+      owner_id: userId,
+      entity_type: note.entityType,
+      entity_id: note.entityId,
+      subject_id: note.subjectId,
+      topic_id: note.topicId ?? null,
+      subtopic_id: note.subtopicId ?? null,
+      note_type: note.noteType,
+      title: note.title,
+      html_content: note.htmlContent,
+      sanitized_version: note.sanitizedVersion || 1,
+      updated_by: userId,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from('study_notes')
+      .upsert(payload, { onConflict: 'entity_type,entity_id,note_type' });
+
+    if (!error) syncedCount++;
+  }
+
+  return { data: syncedCount };
 }
 
 export interface UpsertNoteInput {

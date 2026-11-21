@@ -58,6 +58,7 @@ import {
 } from '../lib/supabaseService';
 import {
   fetchAllStudyNotes,
+  syncLocalStudyNotesToCloud,
   fetchAllLevelTests,
   fetchTestAttempts,
   upsertStudyNote,
@@ -67,6 +68,11 @@ import {
   deleteLevelTest,
   submitTestAttempt,
 } from '../lib/notesTestsService';
+import {
+  loadUserStudyState,
+  saveUserStudyState,
+  migrateLegacyLocalStateToCloud,
+} from '../lib/userStudyStateService';
 import {
   getLinkedAppletConfig,
   saveLinkedAppletConfig,
@@ -280,13 +286,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [currentUser, isDemo]);
 
-  // Helper to get user-specific storage key
-  const getUserKey = (key: string, userId?: string) => {
-    const id = isDemo ? 'demo_sandbox' : userId || currentUser?.id || 'guest';
-    return `${USER_DATA_PREFIX}${id}_${key}`;
-  };
-
-  // State initialization helper
+  // Demo state is memory-only. Real users load and save through Supabase.
   const loadInitialData = (user: AuthUser | null, isDemoMode: boolean = false) => {
     if (isDemoMode || user?.isDemo || user?.id?.startsWith('demo_')) {
       return {
@@ -307,82 +307,26 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
     }
 
-    const id = user?.id || 'guest';
-    const isNewUser = user && !localStorage.getItem(`${USER_DATA_PREFIX}${id}_initialized`);
-
-    if (isNewUser) {
-      // BRAND NEW USER: Starts from 0!
-      // 0% syllabus, 0 tasks, 0 mock tests, 0 hours
-      localStorage.setItem(`${USER_DATA_PREFIX}${id}_initialized`, 'true');
-      return {
-        subjects: createFreshZeroSubjects(),
-        tasks: [],
-        sprints: INITIAL_SPRINTS,
-        mockTests: [],
-        milestones: INITIAL_MILESTONES,
-        calendarEvents: [],
-        baseLoggedHours: 0.0,
-        settings: {
-          targetAir: user.targetAir || 1,
-          targetYear: 2028,
-          examDate: '2028-02-13',
-          dailyGoalHours: 4.5,
-          weeklyGoalHours: 28,
-          streakCount: 1,
-          userName: user.fullName || 'Aspirant',
-          targetCollege: user.targetCollege || 'IISc Bangalore (M.Tech AI)',
-          shareProgressWithCohort: false,
-        },
-      };
-    }
-
-    // Try loading existing user data from local cache
-    try {
-      const savedSubjects = localStorage.getItem(`${USER_DATA_PREFIX}${id}_subjects`);
-      const savedTasks = localStorage.getItem(`${USER_DATA_PREFIX}${id}_tasks`);
-      const savedSprints = localStorage.getItem(`${USER_DATA_PREFIX}${id}_sprints`);
-      const savedMocks = localStorage.getItem(`${USER_DATA_PREFIX}${id}_mockTests`);
-      const savedMilestones = localStorage.getItem(`${USER_DATA_PREFIX}${id}_milestones`);
-      const savedCal = localStorage.getItem(`${USER_DATA_PREFIX}${id}_calendarEvents`);
-      const savedSettings = localStorage.getItem(`${USER_DATA_PREFIX}${id}_settings`);
-      const savedHours = localStorage.getItem(`${USER_DATA_PREFIX}${id}_baseHours`);
-
-      return {
-        subjects: savedSubjects ? JSON.parse(savedSubjects) : createFreshZeroSubjects(),
-        tasks: savedTasks ? JSON.parse(savedTasks) : [],
-        sprints: savedSprints ? JSON.parse(savedSprints) : INITIAL_SPRINTS,
-        mockTests: savedMocks ? JSON.parse(savedMocks) : [],
-        milestones: savedMilestones ? JSON.parse(savedMilestones) : INITIAL_MILESTONES,
-        calendarEvents: savedCal ? JSON.parse(savedCal) : [],
-        baseLoggedHours: savedHours ? Number(savedHours) : 0,
-        settings: savedSettings
-          ? JSON.parse(savedSettings)
-          : user
-          ? {
-              targetAir: user.targetAir || 1,
-              targetYear: 2028,
-              examDate: '2028-02-13',
-              dailyGoalHours: 4.5,
-              weeklyGoalHours: 28,
-              streakCount: 1,
-              userName: user.fullName,
-              targetCollege: user.targetCollege,
-              shareProgressWithCohort: false,
-            }
-          : INITIAL_SETTINGS,
-      };
-    } catch {
-      return {
-        subjects: createFreshZeroSubjects(),
-        tasks: [],
-        sprints: INITIAL_SPRINTS,
-        mockTests: [],
-        milestones: INITIAL_MILESTONES,
-        calendarEvents: [],
-        baseLoggedHours: 0,
-        settings: INITIAL_SETTINGS,
-      };
-    }
+    return {
+      subjects: createFreshZeroSubjects(),
+      tasks: [],
+      sprints: INITIAL_SPRINTS,
+      mockTests: [],
+      milestones: INITIAL_MILESTONES,
+      calendarEvents: [],
+      baseLoggedHours: 0,
+      settings: {
+        targetAir: user?.targetAir || 1,
+        targetYear: 2028,
+        examDate: '2028-02-13',
+        dailyGoalHours: 4.5,
+        weeklyGoalHours: 28,
+        streakCount: 1,
+        userName: user?.fullName || 'Aspirant',
+        targetCollege: user?.targetCollege || 'IISc Bangalore (M.Tech AI)',
+        shareProgressWithCohort: false,
+      },
+    };
   };
 
   const initialData = loadInitialData(null);
@@ -396,6 +340,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(initialData.calendarEvents);
   const [settings, setSettings] = useState<UserSettings>(initialData.settings);
   const [baseLoggedHours, setBaseLoggedHours] = useState<number>(initialData.baseLoggedHours);
+  const [cloudStateLoaded, setCloudStateLoaded] = useState(false);
 
   // Supabase Database Syllabus Sync
   const [isDbConnected, setIsDbConnected] = useState<boolean>(false);
@@ -513,10 +458,28 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsDemo(false);
         setAllUsers(getSavedAccounts());
 
-        // Load data for verified user
+        // Load data for verified user from database state
+        void (async () => {
+          await migrateLegacyLocalStateToCloud(verifiedUser.id);
+          const { state, error } = await loadUserStudyState(verifiedUser.id);
+          if (!isMounted) return;
+          if (error) console.warn('Could not load cloud user study state:', error);
+          if (state) {
+            if (Array.isArray(state.subjects)) setSubjects(state.subjects as Subject[]);
+            if (Array.isArray(state.tasks)) setTasks(state.tasks as Task[]);
+            if (Array.isArray(state.sprints)) setSprints(state.sprints as SprintPlan[]);
+            if (Array.isArray(state.mockTests)) setMockTests(state.mockTests as MockTest[]);
+            if (Array.isArray(state.milestones)) setMilestones(state.milestones as Milestone[]);
+            if (Array.isArray(state.calendarEvents)) setCalendarEvents(state.calendarEvents as CalendarEvent[]);
+            if (state.settings && typeof state.settings === 'object') setSettings(state.settings as UserSettings);
+            if (typeof state.baseLoggedHours === 'number') setBaseLoggedHours(state.baseLoggedHours);
+          }
+          setCloudStateLoaded(true);
+        })();
+
         const userData = loadInitialData(verifiedUser, false);
-        setSubjects(userData.subjects);
-        setTasks(userData.tasks);
+        setSubjects((prev) => prev.length > 0 ? prev : userData.subjects);
+        setTasks((prev) => prev.length > 0 ? prev : userData.tasks);
         setSprints(userData.sprints || INITIAL_SPRINTS);
         setMockTests(userData.mockTests);
         setMilestones(userData.milestones);
@@ -667,7 +630,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const targetIsDemo = target.isDemo || target.id.startsWith('demo_');
     setIsDemo(targetIsDemo);
 
-    // Load new user's isolated data atomically
+    // Load new user's data atomically
     const data = loadInitialData(target, targetIsDemo);
     setSubjects(data.subjects);
     setTasks(data.tasks);
@@ -677,6 +640,24 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCalendarEvents(data.calendarEvents);
     setSettings(data.settings);
     setBaseLoggedHours(data.baseLoggedHours);
+
+    if (!targetIsDemo) {
+      void (async () => {
+        await migrateLegacyLocalStateToCloud(target.id);
+        const { state, error } = await loadUserStudyState(target.id);
+        if (error) console.warn("Could not load switched user's cloud state:", error);
+        if (state) {
+          if (Array.isArray(state.subjects)) setSubjects(state.subjects as Subject[]);
+          if (Array.isArray(state.tasks)) setTasks(state.tasks as Task[]);
+          if (Array.isArray(state.sprints)) setSprints(state.sprints as SprintPlan[]);
+          if (Array.isArray(state.mockTests)) setMockTests(state.mockTests as MockTest[]);
+          if (Array.isArray(state.milestones)) setMilestones(state.milestones as Milestone[]);
+          if (Array.isArray(state.calendarEvents)) setCalendarEvents(state.calendarEvents as CalendarEvent[]);
+          if (state.settings && typeof state.settings === 'object') setSettings(state.settings as UserSettings);
+          if (typeof state.baseLoggedHours === 'number') setBaseLoggedHours(state.baseLoggedHours);
+        }
+      })();
+    }
 
     // Resume persistence after all state slices have settled
     setTimeout(() => {
@@ -719,62 +700,37 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, []);
 
-  // Save current user data whenever state updates (strictly suspended during user transitions or loading)
+  // Persist the complete real-user study state to Supabase; demo state remains memory-only.
   useEffect(() => {
-    if (isSwitchingUser || authLoading) return;
-    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
-    if (!id) return;
-    localStorage.setItem(`${USER_DATA_PREFIX}${id}_subjects`, JSON.stringify(subjects));
-  }, [subjects, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
+    if (isSwitchingUser || authLoading || isDemo || !currentUser || !cloudStateLoaded) return;
 
-  useEffect(() => {
-    if (isSwitchingUser || authLoading) return;
-    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
-    if (!id) return;
-    localStorage.setItem(`${USER_DATA_PREFIX}${id}_tasks`, JSON.stringify(tasks));
-  }, [tasks, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
-
-  useEffect(() => {
-    if (isSwitchingUser || authLoading) return;
-    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
-    if (!id) return;
-    localStorage.setItem(`${USER_DATA_PREFIX}${id}_sprints`, JSON.stringify(sprints));
-  }, [sprints, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
-
-  useEffect(() => {
-    if (isSwitchingUser || authLoading) return;
-    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
-    if (!id) return;
-    localStorage.setItem(`${USER_DATA_PREFIX}${id}_mockTests`, JSON.stringify(mockTests));
-  }, [mockTests, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
-
-  useEffect(() => {
-    if (isSwitchingUser || authLoading) return;
-    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
-    if (!id) return;
-    localStorage.setItem(`${USER_DATA_PREFIX}${id}_milestones`, JSON.stringify(milestones));
-  }, [milestones, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
-
-  useEffect(() => {
-    if (isSwitchingUser || authLoading) return;
-    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
-    if (!id) return;
-    localStorage.setItem(`${USER_DATA_PREFIX}${id}_calendarEvents`, JSON.stringify(calendarEvents));
-  }, [calendarEvents, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
-
-  useEffect(() => {
-    if (isSwitchingUser || authLoading) return;
-    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
-    if (!id) return;
-    localStorage.setItem(`${USER_DATA_PREFIX}${id}_settings`, JSON.stringify(settings));
-  }, [settings, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
-
-  useEffect(() => {
-    if (isSwitchingUser || authLoading) return;
-    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
-    if (!id) return;
-    localStorage.setItem(`${USER_DATA_PREFIX}${id}_baseHours`, String(baseLoggedHours));
-  }, [baseLoggedHours, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
+    void saveUserStudyState(currentUser.id, {
+      subjects,
+      tasks,
+      sprints,
+      mockTests,
+      milestones,
+      calendarEvents,
+      settings,
+      baseLoggedHours,
+    }).catch((error) => {
+      console.warn('Could not persist cloud user study state:', error);
+    });
+  }, [
+    subjects,
+    tasks,
+    sprints,
+    mockTests,
+    milestones,
+    calendarEvents,
+    settings,
+    baseLoggedHours,
+    currentUser,
+    isDemo,
+    isSwitchingUser,
+    authLoading,
+    cloudStateLoaded,
+  ]);
 
   // Auth Operations
   const login = async (email: string, pass: string) => {
@@ -1447,6 +1403,10 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const refreshNotesAndTests = useCallback(async () => {
     setNotesTestsLoading(true);
     try {
+      if (canManageContent && !isDemo) {
+        await syncLocalStudyNotesToCloud(isDemo);
+      }
+
       const [notesRes, testsRes, attemptsRes] = await Promise.all([
         fetchAllStudyNotes(isDemo),
         fetchAllLevelTests(isDemo),
@@ -1467,7 +1427,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } finally {
       setNotesTestsLoading(false);
     }
-  }, [currentUser?.id, isDemo]);
+  }, [currentUser?.id, isDemo, canManageContent]);
 
   useEffect(() => {
     let active = true;

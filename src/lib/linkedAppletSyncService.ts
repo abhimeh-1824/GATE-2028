@@ -10,15 +10,14 @@ import {
 } from '../types';
 import { supabase } from './supabase';
 import { syncUserProfileAndProgressToDatabase } from './peerProgressService';
-import { getSavedCustomResources } from '../data/subjectResources';
 
 export const DEFAULT_LINKED_APPLET_ID = '2a25406d-a516-461a-aab7-208d3865f39c';
 export const DEFAULT_LINKED_PROJECT_ID = 'gen-lang-client-0375433155';
 export const DEFAULT_LINKED_APPLET_URL =
   'https://aistudio.google.com/apps/2a25406d-a516-461a-aab7-208d3865f39c?showPreview=true&showAssistant=true&project=gen-lang-client-0375433155';
 
-const CONFIG_STORAGE_KEY = 'gate_da_linked_applet_config';
-const SNAPSHOT_STORAGE_KEY = `gate_da_snapshot_${DEFAULT_LINKED_APPLET_ID}`;
+let inMemoryLinkedConfig: LinkedAppletConfig | null = null;
+let inMemorySnapshot: AppletSyncPayload | null = null;
 const BROADCAST_CHANNEL_NAME = `ais_sync_channel_${DEFAULT_LINKED_APPLET_ID}`;
 
 // Initialize BroadcastChannel if available in browser environment
@@ -35,14 +34,7 @@ try {
  * Gets the current linked applet configuration.
  */
 export function getLinkedAppletConfig(): LinkedAppletConfig {
-  try {
-    const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
-    if (raw) {
-      return JSON.parse(raw);
-    }
-  } catch (e) {
-    // fallback
-  }
+  if (inMemoryLinkedConfig) return inMemoryLinkedConfig;
 
   return {
     appletId: DEFAULT_LINKED_APPLET_ID,
@@ -60,11 +52,7 @@ export function getLinkedAppletConfig(): LinkedAppletConfig {
  * Saves linked applet configuration.
  */
 export function saveLinkedAppletConfig(config: LinkedAppletConfig): void {
-  try {
-    localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
-  } catch (e) {
-    console.error('Could not save linked applet config:', e);
-  }
+  inMemoryLinkedConfig = config;
 }
 
 /**
@@ -89,7 +77,7 @@ export function buildSyncPayload(
     0
   );
 
-  const customResources = getSavedCustomResources(user?.id || 'guest_user');
+  const customResources: Record<string, StudyResource[]> = {};
 
   return {
     appletId: DEFAULT_LINKED_APPLET_ID,
@@ -202,12 +190,8 @@ export async function pushSyncToLinkedApplet(
     console.warn('BroadcastChannel error:', err);
   }
 
-  // 2. Save locally for instant persistence
-  try {
-    localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(payload));
-  } catch (err) {
-    // storage safe
-  }
+  // 2. Keep an in-memory snapshot for the current session.
+  inMemorySnapshot = payload;
 
   // 3. Post to Node/Express server endpoint (only if verified authenticated session)
   if (!isDemo && payload.user) {
@@ -341,23 +325,17 @@ export async function pullSyncFromLinkedApplet(): Promise<{
     console.warn('Server pull note:', err);
   }
 
-  // 2. Try Local snapshot
-  try {
-    const raw = localStorage.getItem(SNAPSHOT_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      const validated = validateAppletSyncPayload(parsed);
-      if (validated.valid && validated.data) {
-        return {
-          success: true,
-          payload: validated.data,
-          source: 'local',
-          message: 'Loaded cached snapshot for linked applet.',
-        };
-      }
+  // 2. Try the in-memory snapshot for the current session.
+  if (inMemorySnapshot) {
+    const validated = validateAppletSyncPayload(inMemorySnapshot);
+    if (validated.valid && validated.data) {
+      return {
+        success: true,
+        payload: validated.data,
+        source: 'local',
+        message: 'Loaded cached snapshot for linked applet.',
+      };
     }
-  } catch (err) {
-    console.warn('LocalStorage snapshot pull note:', err);
   }
 
   return {

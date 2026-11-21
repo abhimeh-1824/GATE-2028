@@ -50,6 +50,7 @@ import {
   updateManagedUserRole,
 } from '../../lib/supabaseService';
 import { TestRunnerModal } from '../modals/TestRunnerModal';
+import { getDeterministicUuid } from '../../lib/supabaseService';
 
 type StudioTab = 'hierarchy' | 'notes' | 'tests' | 'roles';
 
@@ -58,7 +59,11 @@ function getSubtopicStableId(
   subtopicItems: Array<{ id: string; name: string }> | undefined,
   index: number
 ): string {
-  return subtopicItems?.[index]?.id || `${topicId}::sub_${index}`;
+  const stableId = subtopicItems?.[index]?.id;
+  if (stableId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(stableId)) {
+    return stableId;
+  }
+  return getDeterministicUuid(`subtop_${topicId}_${index}`);
 }
 
 export const ContentStudioView: React.FC = () => {

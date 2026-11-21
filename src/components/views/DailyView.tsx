@@ -20,6 +20,7 @@ import {
 import { useStudy } from '../../context/StudyContext';
 import { TaskType, SubjectId, Task } from '../../types';
 import { AddTaskModal } from '../modals/AddTaskModal';
+import { loadDailyNote, saveDailyNote } from '../../lib/userStudyStateService';
 
 interface DailyViewProps {
   onOpenAddTask: () => void;
@@ -49,23 +50,22 @@ export const DailyView: React.FC<DailyViewProps> = ({ onOpenAddTask }) => {
   const [taskToEdit, setTaskToEdit] = useState<Task | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
-  // Daily reflection notes - user scoped to prevent cross-account leakage
-  const [dailyNotes, setDailyNotes] = useState<string>(() => {
-    return localStorage.getItem(`gate_notes_${userId}_${selectedDate}`) || '';
-  });
+  // Daily reflection notes are stored in Supabase.
+  const [dailyNotes, setDailyNotes] = useState<string>('');
   const [notesSaved, setNotesSaved] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem(`gate_notes_${userId}_${selectedDate}`);
-    if (saved !== null) {
-      setDailyNotes(saved);
-    } else {
+    if (!currentUser) {
       setDailyNotes('');
+      return;
     }
-  }, [selectedDate, userId]);
 
-  const handleSaveNotes = () => {
-    localStorage.setItem(`gate_notes_${userId}_${selectedDate}`, dailyNotes);
+    void loadDailyNote(currentUser.id, selectedDate).then(setDailyNotes);
+  }, [selectedDate, currentUser?.id]);
+
+  const handleSaveNotes = async () => {
+    if (!currentUser) return;
+    await saveDailyNote(currentUser.id, selectedDate, dailyNotes);
     setNotesSaved(true);
     setTimeout(() => setNotesSaved(false), 2000);
   };
