@@ -5,7 +5,6 @@ import {
   Columns3,
   CalendarDays,
   BookOpen,
-  MapPin,
   BarChart3,
   Calendar,
   Sparkles,
@@ -45,7 +44,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     activeView,
     setActiveView,
     tasks,
-    syllabusPercent,
     daysRemaining,
     settings,
     currentUser,
@@ -106,6 +104,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ? 'text-emerald-700 bg-emerald-50 font-mono font-bold'
         : 'text-indigo-700 bg-indigo-50 font-mono',
     },
+    // Restore the MapPin import and syllabusPercent value when enabling Roadmap.
+    /*
     {
       id: 'Roadmap',
       label: 'Roadmap 2028',
@@ -113,6 +113,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: `${syllabusPercent}%`,
       badgeColor: 'text-indigo-700 bg-indigo-50 font-mono',
     },
+    */
     {
       id: 'Analytics',
       label: 'Analytics & Telemetry',

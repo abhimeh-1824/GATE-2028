@@ -1530,7 +1530,8 @@ export const ContentStudioView: React.FC = () => {
                   </p>
                   <p className="text-[11px] text-slate-500 mt-0.5">
                     Supports CSS styling, tables, images, math equations, code blocks, SVG &amp;
-                    interactive animations. Stored as sanitized HTML string in DB.
+                    interactive animations. Inline JavaScript runs in an isolated preview; external
+                    scripts are blocked and browser storage is temporary.
                   </p>
                 </label>
 
@@ -1608,6 +1609,9 @@ export const ContentStudioView: React.FC = () => {
                     sandbox=&quot;allow-scripts&quot;
                   </span>
                 </div>
+                <p className="px-4 py-1.5 border-b border-slate-100 text-[10px] text-slate-500">
+                  Click controls inside the preview; scroll within it to see results below.
+                </p>
                 <div className="flex-1 bg-white">
                   {sanitizedPreview ? (
                     <iframe

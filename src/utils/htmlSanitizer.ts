@@ -10,38 +10,9 @@ export interface SanitizedHtmlResult {
 const MAX_HTML_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB limit for safety
 
 /**
- * Strips potentially hazardous parent-escape patterns from inline script blocks
- * inside educational HTML notes. Note that the primary isolation boundary is
- * `<iframe sandbox="allow-scripts">` WITHOUT `allow-same-origin`, which gives
- * the iframe an opaque null origin so it cannot access parent DOM, cookies,
- * localStorage, or auth tokens.
- */
-function neutralizeScriptEscapes(scriptBody: string, warnings: string[]): string {
-  const blockedPatterns: Array<{ regex: RegExp; label: string }> = [
-    { regex: /\bwindow\s*\.\s*top\b/gi, label: 'window.top reference' },
-    { regex: /\bwindow\s*\.\s*parent\b/gi, label: 'window.parent reference' },
-    { regex: /\btop\s*\.\s*location\b/gi, label: 'top.location redirect' },
-    { regex: /\bparent\s*\.\s*location\b/gi, label: 'parent.location redirect' },
-    { regex: /\bdocument\s*\.\s*cookie\b/gi, label: 'document.cookie access' },
-    { regex: /\blocalStorage\b/gi, label: 'localStorage access' },
-    { regex: /\bsessionStorage\b/gi, label: 'sessionStorage access' },
-    { regex: /\bwindow\s*\.\s*open\s*\(/gi, label: 'window.open call' },
-  ];
-
-  let cleaned = scriptBody;
-  for (const { regex, label } of blockedPatterns) {
-    if (regex.test(cleaned)) {
-      warnings.push(`Blocked restricted script call (${label}) for sandbox safety.`);
-      cleaned = cleaned.replace(regex, 'undefined /* blocked */');
-    }
-  }
-  return cleaned;
-}
-
-/**
  * Sanitizes uploaded HTML content while preserving educational styling, CSS animations,
  * SVG/Canvas interactive explanations, tables, math formulas, and code blocks.
- * Never executes uploaded JS in the main app context.
+ * Inline scripts are preserved for execution only inside the isolated preview iframe.
  */
 export function sanitizeEducationalHtml(rawHtml: string): SanitizedHtmlResult {
   const warnings: string[] = [];
@@ -98,13 +69,31 @@ export function sanitizeEducationalHtml(rawHtml: string): SanitizedHtmlResult {
   working = working.replace(
     /<script\b([^>]*)>([\s\S]*?)<\/script>/gi,
     (_match, attrs: string, body: string) => {
-      if (/\bsrc\s*=/i.test(attrs)) {
+      if (/\s+src\s*=/i.test(attrs)) {
         warnings.push('Stripped external <script src="..."> tag; only inline interactive scripts are permitted inside the sandbox.');
         return '';
       }
-      const cleanedScript = neutralizeScriptEscapes(body, warnings);
-      if (cleanedScript.trim()) {
-        preservedScripts.push(cleanedScript);
+
+      const typeMatch = attrs.match(/\s+type\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+      const scriptType = (typeMatch?.[1] ?? typeMatch?.[2] ?? typeMatch?.[3] ?? '')
+        .trim()
+        .toLowerCase();
+      const isModule = scriptType === 'module';
+      const isJavaScript = [
+        '',
+        'text/javascript',
+        'application/javascript',
+        'text/ecmascript',
+        'application/ecmascript',
+      ].includes(scriptType);
+      if (!isModule && !isJavaScript) {
+        warnings.push(`Stripped unsupported inline script type "${scriptType}".`);
+        return '';
+      }
+
+      if (body.trim()) {
+        const typeAttribute = isModule ? ' type="module"' : '';
+        preservedScripts.push(`<script${typeAttribute}>\n${body}\n</script>`);
       }
       return '';
     }
@@ -145,6 +134,8 @@ export function sanitizeEducationalHtml(rawHtml: string): SanitizedHtmlResult {
           FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'applet', 'base', 'link', 'meta', 'form'],
           FORBID_ATTR: ['formaction', 'xlink:href'],
           ALLOW_DATA_ATTR: true,
+          // Keep authored IDs intact when inline scripts run only in the isolated preview iframe.
+          SANITIZE_DOM: preservedScripts.length === 0,
         })
       : bodySource
           .replace(/<script\b[\s\S]*?<\/script>/gi, '')
@@ -153,8 +144,7 @@ export function sanitizeEducationalHtml(rawHtml: string): SanitizedHtmlResult {
   // Reassemble sanitized canonical HTML string stored in database
   const styleBlock =
     preservedStyles.length > 0 ? `<style>\n${preservedStyles.join('\n\n')}\n</style>\n` : '';
-  const scriptBlock =
-    preservedScripts.length > 0 ? `\n<script>\n${preservedScripts.join('\n\n')}\n</script>` : '';
+  const scriptBlock = preservedScripts.length > 0 ? `\n${preservedScripts.join('\n\n')}` : '';
 
   const sanitizedHtml = `${styleBlock}${cleanBody}${scriptBlock}`.trim();
   const srcDoc = buildSandboxedSrcDoc(sanitizedHtml);
@@ -180,6 +170,76 @@ export function buildSandboxedSrcDoc(sanitizedHtml: string, title = 'Study Notes
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https:; script-src 'unsafe-inline'; img-src data: https: blob:; font-src data: https:; media-src data: https:;" />
   <title>${safeTitle}</title>
+  <script>
+    (() => {
+      // Keep common storage-based note scripts working without sharing browser storage.
+      const createMemoryStorage = () => {
+        const values = new Map();
+        return {
+          get length() { return values.size; },
+          clear() { values.clear(); },
+          getItem(key) {
+            const normalizedKey = String(key);
+            return values.has(normalizedKey) ? values.get(normalizedKey) : null;
+          },
+          key(index) { return Array.from(values.keys())[index] ?? null; },
+          removeItem(key) { values.delete(String(key)); },
+          setItem(key, value) { values.set(String(key), String(value)); },
+        };
+      };
+
+      Object.defineProperty(window, 'localStorage', {
+        configurable: true,
+        value: createMemoryStorage(),
+      });
+      Object.defineProperty(window, 'sessionStorage', {
+        configurable: true,
+        value: createMemoryStorage(),
+      });
+
+      const reportScriptError = (message) => {
+        const showError = () => {
+          let panel = document.getElementById('__note_script_error');
+          if (!panel) {
+            panel = document.createElement('div');
+            panel.id = '__note_script_error';
+            panel.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:2147483647;max-height:40vh;overflow:auto;padding:8px 10px;background:#fff1f2;color:#991b1b;border:1px solid #fda4af;border-radius:8px;font:12px/1.4 system-ui,sans-serif;overflow-wrap:anywhere;white-space:pre-wrap;box-shadow:0 2px 8px #0002;';
+            document.body.appendChild(panel);
+          }
+          panel.textContent = 'Interactive note script error: ' + String(message);
+        };
+
+        if (document.body) {
+          showError();
+        } else {
+          document.addEventListener('DOMContentLoaded', showError, { once: true });
+        }
+      };
+
+      window.addEventListener('error', (event) => {
+        const stack = event.error && event.error.stack ? ' ' + String(event.error.stack) : '';
+        const sourceLines = document.documentElement.outerHTML.split('\n');
+        const sourceLine = sourceLines[event.lineno - 1] || '';
+        const excerpt = sourceLine
+          ? '\nAt ' +
+            event.lineno +
+            ':' +
+            event.colno +
+            ': ' +
+            sourceLine.slice(Math.max(0, event.colno - 50), event.colno + 50)
+          : '';
+        reportScriptError((event.message || 'Unknown JavaScript error.') + excerpt + stack);
+      });
+      window.addEventListener('unhandledrejection', (event) => {
+        const reason = event.reason;
+        const message =
+          reason && typeof reason === 'object' && 'message' in reason
+            ? reason.message
+            : reason;
+        reportScriptError(message || 'Unhandled promise rejection.');
+      });
+    })();
+  </script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     html, body {
