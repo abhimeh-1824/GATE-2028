@@ -274,7 +274,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 )}
               </div>
 
-              {/* Sign Out / Switch Account */}
+              {/* Sign Out / Account Sign In */}
               <div className="pt-1 border-t border-slate-100">
                 {onOpenAuthModal && (
                   <button
@@ -285,7 +285,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                     className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-slate-50 text-indigo-700 font-medium transition-colors"
                   >
                     <User className="w-4 h-4 text-indigo-600" />
-                    <span>Switch Aspirant Profile</span>
+                    <span>Sign In with Another Account</span>
                   </button>
                 )}
 

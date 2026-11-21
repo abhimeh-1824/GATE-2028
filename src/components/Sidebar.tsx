@@ -47,7 +47,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     daysRemaining,
     settings,
     currentUser,
-    allUsers,
     resetToDefaults,
   } = useStudy();
   const [soundEnabled, setSoundEnabled] = React.useState(soundManager.isEnabled());
@@ -253,11 +252,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         >
           <div className="flex items-center gap-2.5 truncate">
             <Sparkles className="w-4 h-4 text-indigo-600" />
-            <span>{currentUser ? 'Switch Aspirant' : 'Sign In / Register'}</span>
+            <span>{currentUser ? 'Account Sign In' : 'Sign In / Register'}</span>
           </div>
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800">
-            {allUsers.length > 0 ? `${allUsers.length} Users` : '0% Base'}
-          </span>
         </button>
 
         {onOpenTour && (
@@ -304,7 +300,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               if (isMobile && onCloseMobile) onCloseMobile();
             }}
             className="flex items-center gap-2 min-w-0 cursor-pointer group flex-1"
-            title="Click to Switch User or Manage Accounts"
+            title="Click to Sign In or Manage Account"
           >
             <div className="w-7 h-7 rounded-full bg-indigo-700 text-white flex items-center justify-center text-xs font-semibold shrink-0 group-hover:ring-2 group-hover:ring-indigo-300 transition-all">
               {currentUser ? currentUser.fullName.charAt(0).toUpperCase() : settings.userName.charAt(0).toUpperCase()}

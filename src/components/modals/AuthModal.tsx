@@ -8,24 +8,19 @@ import {
   User,
   Target,
   Award,
-  Users,
   CheckCircle2,
   AlertCircle,
   Sparkles,
-  ArrowRight,
-  Database,
   KeyRound,
-  RotateCcw
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
-import { AuthUser } from '../../types';
 import { supabase } from '../../lib/supabase';
 import { getAppUrl } from '../../lib/appUrl';
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  defaultTab?: 'login' | 'register' | 'switch';
+  defaultTab?: 'login' | 'register';
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
@@ -33,9 +28,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   defaultTab = 'login',
 }) => {
-  const { currentUser, allUsers, login, register, switchUser, logout, loginAsDemo } = useStudy();
+  const { login, register, loginAsDemo } = useStudy();
 
-  const [activeTab, setActiveTab] = useState<'login' | 'register' | 'switch' | 'forgot'>(defaultTab);
+  const [activeTab, setActiveTab] = useState<'login' | 'register' | 'forgot'>(defaultTab);
 
   useEffect(() => {
     if (isOpen) {
@@ -172,15 +167,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const handleQuickSwitch = (targetUser: AuthUser) => {
-    switchUser(targetUser.id);
-    setSuccessNotice(`Switched active profile to ${targetUser.fullName}`);
-    setTimeout(() => {
-      onClose();
-      setSuccessNotice(null);
-    }, 600);
-  };
-
   return (
     <div
       role="dialog"
@@ -245,23 +231,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <UserPlus className="w-3.5 h-3.5" />
             <span>Register (Clean 0%)</span>
           </button>
-
-          {allUsers.length > 0 && (
-            <button
-              onClick={() => {
-                setActiveTab('switch');
-                setErrorMessage(null);
-              }}
-              className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition-colors flex items-center gap-1.5 ${
-                activeTab === 'switch'
-                  ? 'border-indigo-700 text-indigo-700'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <Users className="w-3.5 h-3.5" />
-              <span>Switch ({allUsers.length})</span>
-            </button>
-          )}
 
           {activeTab === 'forgot' && (
             <button
@@ -564,76 +533,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </button>
             </div>
           </form>
-        )}
-
-        {/* Tab 4: Multiple Users Switcher */}
-        {activeTab === 'switch' && (
-          <div className="p-5 space-y-3">
-            <p className="text-xs text-slate-600">
-              Select any registered account to switch sessions. Each user maintains their own independent progress, tasks, and syllabus completion rate:
-            </p>
-
-            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-              {allUsers.map((u) => {
-                const isCurrent = currentUser?.id === u.id;
-
-                return (
-                  <button
-                    key={u.id}
-                    type="button"
-                    onClick={() => handleQuickSwitch(u)}
-                    aria-label={`Switch to user ${u.fullName}`}
-                    className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
-                      isCurrent
-                        ? 'bg-indigo-50/60 border-indigo-400 ring-1 ring-indigo-200'
-                        : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-full bg-indigo-700 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                        {u.fullName.charAt(0).toUpperCase()}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-slate-900 truncate">
-                          {u.fullName}
-                        </div>
-                        <div className="text-[11px] text-slate-500 truncate">
-                          {u.email}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="text-right shrink-0">
-                      <span className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-100/60 px-1.5 py-0.5 rounded">
-                        AIR #{u.targetAir}
-                      </span>
-                      {isCurrent && (
-                        <div className="text-[10px] text-emerald-600 font-semibold mt-0.5">
-                          Active
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {currentUser && (
-              <div className="pt-2 border-t border-slate-100 flex justify-between items-center">
-                <span className="text-xs text-slate-500">Currently signed in</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    logout();
-                    onClose();
-                  }}
-                  className="text-xs font-semibold text-rose-600 hover:text-rose-700 cursor-pointer"
-                >
-                  Sign Out
-                </button>
-              </div>
-            )}
-          </div>
         )}
       </div>
     </div>
