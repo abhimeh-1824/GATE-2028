@@ -27,7 +27,7 @@ export const AddResourceModal: React.FC<AddResourceModalProps> = ({
   isOpen,
   onClose,
   subjects,
-  defaultSubjectId = 'prob_stat',
+  defaultSubjectId = '',
   defaultTopicId,
   defaultSubtopicTitle = '',
   onSaveResource,

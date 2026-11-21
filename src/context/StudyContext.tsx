@@ -17,12 +17,8 @@ import {
   AppletSyncPayload,
 } from '../types';
 import {
-  INITIAL_SUBJECTS,
-  INITIAL_TASKS,
   INITIAL_SPRINTS,
-  INITIAL_MOCK_TESTS,
   INITIAL_MILESTONES,
-  INITIAL_CALENDAR_EVENTS,
   INITIAL_SETTINGS,
   createFreshZeroSubjects,
 } from '../data/gateDaSyllabus';
@@ -75,7 +71,7 @@ interface StudyContextType {
   switchUser: (userId: string) => void;
   loginAsDemo: () => void;
 
-  // Supabase Database Sync (Read-only for canonical syllabus, user progress owned)
+  // Supabase Database Sync
   isDbConnected: boolean;
   isSyncingDb: boolean;
   dbSyncMessage: string;
@@ -129,6 +125,9 @@ interface StudyContextType {
   updateSprint: (sprintId: string, updates: Partial<SprintPlan>) => void;
   completeSprint: (sprintId: string, retro: SprintRetrospective) => void;
   deleteSprint: (sprintId: string) => void;
+  addSubject: (name: string, shortCode: string) => Promise<string>;
+  addTopic: (subjectId: SubjectId, title: string) => Promise<void>;
+  addSubtopic: (subjectId: SubjectId, topicId: string, name: string) => Promise<void>;
   updateTopicStatus: (subjectId: SubjectId, topicId: string, status: TopicStatus) => void;
   updateTopicConfidence: (subjectId: SubjectId, topicId: string, confidence: number) => void;
   addMockTest: (mock: Omit<MockTest, 'id'>) => void;
@@ -188,13 +187,13 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const loadInitialData = (user: AuthUser | null, isDemoMode: boolean = false) => {
     if (isDemoMode || user?.isDemo || user?.id?.startsWith('demo_')) {
       return {
-        subjects: INITIAL_SUBJECTS,
-        tasks: INITIAL_TASKS,
+        subjects: createFreshZeroSubjects(),
+        tasks: [],
         sprints: INITIAL_SPRINTS,
-        mockTests: INITIAL_MOCK_TESTS,
+        mockTests: [],
         milestones: INITIAL_MILESTONES,
-        calendarEvents: INITIAL_CALENDAR_EVENTS,
-        baseLoggedHours: 412.5,
+        calendarEvents: [],
+        baseLoggedHours: 0,
         settings: {
           ...INITIAL_SETTINGS,
           userName: 'Demo Aspirant',
@@ -246,13 +245,13 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const savedHours = localStorage.getItem(`${USER_DATA_PREFIX}${id}_baseHours`);
 
       return {
-        subjects: savedSubjects ? JSON.parse(savedSubjects) : (user ? createFreshZeroSubjects() : INITIAL_SUBJECTS),
-        tasks: savedTasks ? JSON.parse(savedTasks) : (user ? [] : INITIAL_TASKS),
+        subjects: savedSubjects ? JSON.parse(savedSubjects) : createFreshZeroSubjects(),
+        tasks: savedTasks ? JSON.parse(savedTasks) : [],
         sprints: savedSprints ? JSON.parse(savedSprints) : INITIAL_SPRINTS,
         mockTests: savedMocks ? JSON.parse(savedMocks) : [],
         milestones: savedMilestones ? JSON.parse(savedMilestones) : INITIAL_MILESTONES,
         calendarEvents: savedCal ? JSON.parse(savedCal) : [],
-        baseLoggedHours: savedHours ? Number(savedHours) : 0.0,
+        baseLoggedHours: savedHours ? Number(savedHours) : 0,
         settings: savedSettings
           ? JSON.parse(savedSettings)
           : user
@@ -271,13 +270,13 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
     } catch {
       return {
-        subjects: user ? createFreshZeroSubjects() : INITIAL_SUBJECTS,
-        tasks: user ? [] : INITIAL_TASKS,
+        subjects: createFreshZeroSubjects(),
+        tasks: [],
         sprints: INITIAL_SPRINTS,
         mockTests: [],
         milestones: INITIAL_MILESTONES,
         calendarEvents: [],
-        baseLoggedHours: 0.0,
+        baseLoggedHours: 0,
         settings: INITIAL_SETTINGS,
       };
     }
@@ -288,7 +287,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [subjects, setSubjects] = useState<Subject[]>(initialData.subjects);
   const [tasks, setTasks] = useState<Task[]>(initialData.tasks);
   const [sprints, setSprints] = useState<SprintPlan[]>(initialData.sprints || INITIAL_SPRINTS);
-  const [selectedSprintWeek, setSelectedSprintWeek] = useState<string>('2026-W40');
+  const [selectedSprintWeek, setSelectedSprintWeek] = useState<string>('all');
   const [mockTests, setMockTests] = useState<MockTest[]>(initialData.mockTests);
   const [milestones, setMilestones] = useState<Milestone[]>(initialData.milestones);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(initialData.calendarEvents);
@@ -296,9 +295,9 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [baseLoggedHours, setBaseLoggedHours] = useState<number>(initialData.baseLoggedHours);
 
   // Supabase Database Syllabus Sync
-  const [isDbConnected, setIsDbConnected] = useState<boolean>(true);
+  const [isDbConnected, setIsDbConnected] = useState<boolean>(false);
   const [isSyncingDb, setIsSyncingDb] = useState<boolean>(false);
-  const [dbSyncMessage, setDbSyncMessage] = useState<string>('Official syllabus verified and read-only');
+  const [dbSyncMessage, setDbSyncMessage] = useState<string>('Sign in to load your syllabus from Supabase.');
   const [dbStats, setDbStats] = useState<{ subjectsCount: number; topicsCount: number; subtopicsCount: number }>({
     subjectsCount: initialData.subjects.length,
     topicsCount: initialData.subjects.reduce((acc: number, s: Subject) => acc + s.topics.length, 0),
@@ -331,33 +330,59 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const fetchSyllabusFromDb = useCallback(async () => {
-    // Only query database if user is authenticated and not demo
-    if (isDemo || !currentUser) {
-      setDbSyncMessage('Official syllabus loaded from canonical course definition');
+    if (!currentUser || isDemo || currentUser.id.startsWith('demo_') || currentUser.id.startsWith('guest_')) {
+      setSubjects([]);
+      setDbStats({ subjectsCount: 0, topicsCount: 0, subtopicsCount: 0 });
+      setDbSyncMessage('Sign in to load your syllabus from Supabase.');
       return;
     }
+
+    const ownerId = currentUser.id;
     setIsSyncingDb(true);
     try {
-      const result = await fetchSyllabusFromDatabase(subjects);
+      const result = await fetchSyllabusFromDatabase(ownerId);
+      if (getActiveUserId() !== ownerId) return;
       setIsDbConnected(true);
       setDbStats(result.stats);
       setDbSyncMessage(result.message);
-      if (result.isFromDatabase && result.subjects.length > 0) {
-        setSubjects(result.subjects);
-      }
-    } catch (e: any) {
-      console.warn('fetchSyllabusFromDb err:', e);
-      setDbSyncMessage(e?.message || 'Database query finished');
+      setSubjects(result.subjects);
+    } catch (error) {
+      setIsDbConnected(false);
+      const message = error instanceof Error ? error.message : 'Could not load your syllabus.';
+      console.warn('fetchSyllabusFromDb err:', error);
+      setDbSyncMessage(message);
     } finally {
       setIsSyncingDb(false);
     }
-  }, [subjects, isDemo, currentUser]);
+  }, [currentUser?.id, isDemo]);
 
-  // Canonical syllabus is strictly read-only for students
+  // Save the current user's frontend-created syllabus to Supabase.
   const syncSyllabusToDb = useCallback(async () => {
-    setDbSyncMessage('Canonical curriculum is read-only. Your topic mastery and status are tracked in your profile.');
-    soundManager.playSubtleTick();
-  }, []);
+    setIsSyncingDb(true);
+    try {
+      if (!currentUser || isDemo || currentUser.id.startsWith('demo_') || currentUser.id.startsWith('guest_')) {
+        throw new Error('Sign in to save your syllabus to Supabase.');
+      }
+
+      const result = await saveSyllabusToDatabase(subjects, currentUser.id);
+      setDbSyncMessage(result.message);
+      setDbStats({
+        subjectsCount: result.subjectsSaved,
+        topicsCount: result.topicsSaved,
+        subtopicsCount: result.subtopicsSaved,
+      });
+      if (!result.success) throw new Error(result.error || result.message);
+      setIsDbConnected(true);
+      soundManager.playCompletionChime();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not save your syllabus.';
+      console.warn('syncSyllabusToDb err:', error);
+      setIsDbConnected(false);
+      setDbSyncMessage(message);
+    } finally {
+      setIsSyncingDb(false);
+    }
+  }, [currentUser?.id, isDemo, subjects]);
 
   // Supabase Auth Session Initialization & Lifecycle Listener on Mount
   useEffect(() => {
@@ -453,13 +478,16 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setActiveUserId(null);
         setCurrentUser(null);
         setIsDemo(false);
-        setSubjects(createFreshZeroSubjects());
+        setSubjects([]);
         setTasks([]);
         setSprints(INITIAL_SPRINTS);
         setMockTests([]);
         setCalendarEvents([]);
-        setBaseLoggedHours(0.0);
+        setBaseLoggedHours(0);
         setSettings(INITIAL_SETTINGS);
+        setIsDbConnected(false);
+        setDbStats({ subjectsCount: 0, topicsCount: 0, subtopicsCount: 0 });
+        setDbSyncMessage('Sign in to load your syllabus from Supabase.');
       }
     });
 
@@ -468,6 +496,16 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!currentUser || isDemo) {
+      setSubjects([]);
+      setDbStats({ subjectsCount: 0, topicsCount: 0, subtopicsCount: 0 });
+      setDbSyncMessage('Sign in to load your syllabus from Supabase.');
+      return;
+    }
+    void fetchSyllabusFromDb();
+  }, [currentUser?.id, isDemo, fetchSyllabusFromDb]);
 
   const [activeView, setActiveView] = useState<string>('Dashboard');
 
@@ -484,8 +522,8 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     timeLeft: 25 * 60,
     initialTime: 25 * 60,
     mode: 'focus',
-    subjectId: 'linear_algebra',
-    topicTitle: 'Projections, LU Decomposition & SVD',
+    subjectId: '',
+    topicTitle: '',
   });
 
   // Switch user handler with request generation tokens and cancellation
@@ -652,12 +690,17 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setActiveUserId(null);
 
     // Revert to clean guest state
-    setSubjects(createFreshZeroSubjects());
+    setSubjects([]);
     setTasks([]);
+    setSprints(INITIAL_SPRINTS);
     setMockTests([]);
+    setMilestones(INITIAL_MILESTONES);
     setCalendarEvents([]);
-    setBaseLoggedHours(0.0);
+    setBaseLoggedHours(0);
     setSettings(INITIAL_SETTINGS);
+    setIsDbConnected(false);
+    setDbStats({ subjectsCount: 0, topicsCount: 0, subtopicsCount: 0 });
+    setDbSyncMessage('Sign in to load your syllabus from Supabase.');
   };
 
   const loginAsDemo = useCallback(() => {
@@ -929,6 +972,104 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     soundManager.playSubtleTick();
   };
 
+  const persistSyllabus = async (updatedSubjects: Subject[]) => {
+    if (!currentUser || currentUser.id.startsWith('demo_') || currentUser.id.startsWith('guest_')) {
+      throw new Error('Sign in with a Supabase account before adding syllabus entries.');
+    }
+
+    const result = await saveSyllabusToDatabase(updatedSubjects, currentUser.id);
+    if (!result.success) throw new Error(result.error || result.message);
+
+    setSubjects(updatedSubjects);
+    setDbStats({
+      subjectsCount: result.subjectsSaved,
+      topicsCount: result.topicsSaved,
+      subtopicsCount: result.subtopicsSaved,
+    });
+    setDbSyncMessage(result.message);
+    setIsDbConnected(true);
+    soundManager.playSubtleTick();
+  };
+
+  const addSubject = async (name: string, shortCode: string): Promise<string> => {
+    const cleanName = name.trim();
+    const cleanCode = shortCode.trim().toUpperCase();
+    if (!cleanName || !cleanCode) throw new Error('Subject name and code are required.');
+    if (subjects.some((subject) => subject.shortCode.toLowerCase() === cleanCode.toLowerCase())) {
+      throw new Error('A subject with this code already exists.');
+    }
+
+    const subject: Subject = {
+      id: crypto.randomUUID(),
+      name: cleanName,
+      shortCode: cleanCode,
+      weightageMarks: '',
+      approxQuestions: 0,
+      color: '#4f46e5',
+      bgLight: '#eef2ff',
+      borderColor: '#c7d2fe',
+      description: '',
+      recommendedBooks: [],
+      topics: [],
+    };
+
+    await persistSyllabus([...subjects, subject]);
+    return subject.id;
+  };
+
+  const addTopic = async (subjectId: SubjectId, title: string) => {
+    const cleanTitle = title.trim();
+    const subject = subjects.find((item) => item.id === subjectId);
+    if (!subject) throw new Error('Select a subject before adding a topic.');
+    if (!cleanTitle) throw new Error('Topic name is required.');
+    if (subject.topics.some((topic) => topic.title.toLowerCase() === cleanTitle.toLowerCase())) {
+      throw new Error('This topic already exists in the selected subject.');
+    }
+
+    const topic: Topic = {
+      id: crypto.randomUUID(),
+      subjectId,
+      title: cleanTitle,
+      subtopics: [],
+      weightageTier: 'Foundational',
+      status: 'unvisited',
+      confidenceScore: 3,
+      pyqsTotal: 0,
+      pyqsSolved: 0,
+      pyqAccuracy: 0,
+      formulas: [],
+      commonTraps: [],
+    };
+
+    await persistSyllabus(subjects.map((item) => (
+      item.id === subjectId ? { ...item, topics: [...item.topics, topic] } : item
+    )));
+  };
+
+  const addSubtopic = async (subjectId: SubjectId, topicId: string, name: string) => {
+    const cleanName = name.trim();
+    const subject = subjects.find((item) => item.id === subjectId);
+    const topic = subject?.topics.find((item) => item.id === topicId);
+    if (!topic) throw new Error('Select a topic before adding a subtopic.');
+    if (!cleanName) throw new Error('Subtopic name is required.');
+    if (topic.subtopics.some((subtopic) => subtopic.toLowerCase() === cleanName.toLowerCase())) {
+      throw new Error('This subtopic already exists in the selected topic.');
+    }
+
+    await persistSyllabus(subjects.map((item) => (
+      item.id === subjectId
+        ? {
+            ...item,
+            topics: item.topics.map((currentTopic) => (
+              currentTopic.id === topicId
+                ? { ...currentTopic, subtopics: [...currentTopic.subtopics, cleanName] }
+                : currentTopic
+            )),
+          }
+        : item
+    )));
+  };
+
   const updateTopicStatus = (subjectId: SubjectId, topicId: string, status: TopicStatus) => {
     setSubjects((prev) =>
       prev.map((subj) => {
@@ -1017,7 +1158,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const newTask: Task = {
       id: `session_${Date.now()}`,
       title: `Focus Session: ${topicTitle || 'Deep Study Block'}`,
-      subjectId: subjectId || 'linear_algebra',
+      subjectId: subjectId || subjects[0]?.id || '',
       topicTitle: topicTitle || 'Core Focus',
       type: 'concept',
       durationMinutes: minutes,
@@ -1037,12 +1178,13 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const resetToDefaults = () => {
-    setSubjects(currentUser ? createFreshZeroSubjects() : INITIAL_SUBJECTS);
-    setTasks(currentUser ? [] : INITIAL_TASKS);
-    setMockTests(currentUser ? [] : INITIAL_MOCK_TESTS);
+    setSubjects([]);
+    setTasks([]);
+    setSprints(INITIAL_SPRINTS);
+    setMockTests([]);
     setMilestones(INITIAL_MILESTONES);
-    setCalendarEvents(currentUser ? [] : INITIAL_CALENDAR_EVENTS);
-    setBaseLoggedHours(currentUser ? 0.0 : 412.5);
+    setCalendarEvents([]);
+    setBaseLoggedHours(0);
     setSettings(INITIAL_SETTINGS);
     soundManager.playSubtleTick();
   };
@@ -1068,17 +1210,11 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const data = JSON.parse(jsonStr);
       if (!data || typeof data !== 'object') return false;
 
-      const validSubjectIds = new Set<string>([
-        'prob_stat',
-        'linear_algebra',
-        'calculus_opt',
-        'dsa_python',
-        'dbms_warehouse',
-        'machine_learning',
-        'artificial_intel',
-        'general_aptitude',
-        'mock_pyq',
-      ]);
+      const validSubjectIds = new Set<string>(
+        Array.isArray(data.subjects)
+          ? data.subjects.map((subject: Partial<Subject>) => subject.id).filter((id: unknown): id is string => typeof id === 'string')
+          : subjects.map((subject) => subject.id)
+      );
       const validTopicStatuses = new Set<string>(['completed', 'in_progress', 'revision_due', 'unvisited']);
       const validTaskTypes = new Set<string>(['concept', 'textbook', 'pyq', 'revision', 'test']);
       const validPriorities = new Set<string>(['urgent', 'high', 'normal']);
@@ -1086,12 +1222,12 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       // 1. Strict validation for subjects
       if (data.subjects !== undefined) {
-        if (!Array.isArray(data.subjects) || data.subjects.length === 0 || data.subjects.length > 25) {
+        if (!Array.isArray(data.subjects) || data.subjects.length > 25) {
           return false;
         }
         for (const s of data.subjects) {
           if (!s || typeof s !== 'object') return false;
-          if (!validSubjectIds.has(s.id) || typeof s.name !== 'string' || !Array.isArray(s.topics)) {
+          if (typeof s.id !== 'string' || typeof s.name !== 'string' || !Array.isArray(s.topics)) {
             return false;
           }
           if (s.topics.length > 100) return false;
@@ -1402,6 +1538,9 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         updateSprint,
         completeSprint,
         deleteSprint,
+        addSubject,
+        addTopic,
+        addSubtopic,
         updateTopicStatus,
         updateTopicConfidence,
         addMockTest,

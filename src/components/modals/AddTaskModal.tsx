@@ -10,17 +10,17 @@ interface AddTaskModalProps {
 }
 
 export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, taskToEdit }) => {
-  const { subjects, sprints, selectedSprintWeek, addTask, updateTask } = useStudy();
+  const { subjects, sprints, selectedSprintWeek, addTask, updateTask, setActiveView } = useStudy();
 
   const [title, setTitle] = useState('');
-  const [subjectId, setSubjectId] = useState<SubjectId>('linear_algebra');
+  const [subjectId, setSubjectId] = useState<SubjectId>('');
   const [topicTitle, setTopicTitle] = useState('');
   const [type, setType] = useState<TaskType>('concept');
   const [durationMinutes, setDurationMinutes] = useState(45);
   const [scheduledTime, setScheduledTime] = useState('09:00 AM');
   const [priority, setPriority] = useState<PriorityLevel>('high');
   const [status, setStatus] = useState<TaskStatus>('todo');
-  const [sprintWeek, setSprintWeek] = useState<string>('2026-W40');
+  const [sprintWeek, setSprintWeek] = useState<string>('none');
   const [storyPoints, setStoryPoints] = useState<number>(3);
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -37,20 +37,20 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, tas
         setScheduledTime(taskToEdit.scheduledTime || '09:00 AM');
         setPriority(taskToEdit.priority || 'high');
         setStatus(taskToEdit.status || (taskToEdit.completed ? 'done' : 'todo'));
-        setSprintWeek(taskToEdit.sprintWeek || '2026-W40');
+        setSprintWeek(taskToEdit.sprintWeek || 'none');
         setStoryPoints(taskToEdit.storyPoints || 3);
         setNotes(taskToEdit.notes || '');
       } else {
         setTitle('');
-        setSubjectId('linear_algebra');
-        const laTopics = subjects.find((s) => s.id === 'linear_algebra')?.topics;
-        setTopicTitle(laTopics?.[0]?.title || 'Matrices & Vector Spaces');
+        const firstSubject = subjects[0];
+        setSubjectId(firstSubject?.id || '');
+        setTopicTitle(firstSubject?.topics[0]?.title || '');
         setType('concept');
         setDurationMinutes(45);
         setScheduledTime('09:00 AM');
         setPriority('high');
         setStatus('todo');
-        setSprintWeek(selectedSprintWeek !== 'all' && selectedSprintWeek !== 'backlog' ? selectedSprintWeek : '2026-W40');
+        setSprintWeek(selectedSprintWeek !== 'all' && selectedSprintWeek !== 'backlog' ? selectedSprintWeek : 'none');
         setStoryPoints(3);
         setNotes('');
       }
@@ -77,7 +77,7 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, tas
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || isSubmitting) return;
+    if (!title.trim() || !subjectId || isSubmitting) return;
 
     setIsSubmitting(true);
 
@@ -149,6 +149,21 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, tas
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          {subjects.length === 0 && !taskToEdit && (
+            <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center justify-between gap-3">
+              <span>Create a subject before adding a study task.</span>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  setActiveView('Subjects');
+                }}
+                className="font-bold underline underline-offset-2 whitespace-nowrap"
+              >
+                Add subject
+              </button>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">
               Task Title *
@@ -170,6 +185,8 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, tas
               </label>
               <select
                 value={subjectId}
+                required
+                disabled={subjects.length === 0}
                 onChange={(e) => {
                   const newSubjId = e.target.value as SubjectId;
                   setSubjectId(newSubjId);
@@ -328,7 +345,7 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, tas
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !subjectId}
               className="px-4 py-2 text-xs font-semibold bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg shadow-xs transition-colors cursor-pointer disabled:opacity-50"
             >
               {taskToEdit ? 'Save Changes' : 'Add Target'}

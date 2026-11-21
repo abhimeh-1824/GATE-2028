@@ -42,7 +42,7 @@ const PeerDetailModalContent: React.FC<{
   onClose: () => void;
 }> = ({ peer, onClose }) => {
   const [selectedSubjectId, setSelectedSubjectId] = useState<SubjectId>(
-    (peer.subjects[0]?.subjectId as SubjectId) || 'prob_stat'
+    (peer.subjects[0]?.subjectId as SubjectId) || ''
   );
   const [expandedTopicId, setExpandedTopicId] = useState<string | null>(null);
 

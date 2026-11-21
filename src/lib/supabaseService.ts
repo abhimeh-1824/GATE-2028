@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { AuthUser, Task, SubjectId, PriorityLevel, TaskType, Subject, Topic } from '../types';
+import { AuthUser, Task, SubjectId, PriorityLevel, TaskType, Subject, Topic, TopicStatus } from '../types';
 
 export interface AuthResponse {
   user: AuthUser | null;
@@ -291,7 +291,7 @@ export async function loadTasksFromSupabase(studentId?: string): Promise<Task[]>
     return data.map((row: any) => ({
       id: row.id,
       title: row.title,
-      subjectId: (row.subject_id as SubjectId) || 'linear_algebra',
+      subjectId: (row.subject_id as SubjectId) || '',
       topicTitle: row.title,
       type: 'concept' as TaskType,
       durationMinutes: row.estimated_minutes || 45,
@@ -319,7 +319,7 @@ export async function fetchTopicsNeedingRevision(
     // 1. Query Supabase topics table with optional user scoping
     let query = supabase.from('topics').select('*');
     if (studentId) {
-      query = query.eq('user_id', studentId);
+      query = query.eq('owner_id', studentId);
     }
     const { data: supabaseTopics, error } = await query;
 
@@ -337,8 +337,8 @@ export async function fetchTopicsNeedingRevision(
           topicsList.push({
             id: String(row.id),
             title: row.name || row.title || 'Topic',
-            subjectId: (row.subject_id as SubjectId) || 'prob_stat',
-            subjectName: row.subject_name || 'Probability & Statistics',
+            subjectId: (row.subject_id as SubjectId) || '',
+            subjectName: row.subject_name || '',
             averageScore: avgScore,
             pyqAccuracy: pyqAcc,
             reason,
@@ -430,181 +430,217 @@ export interface SyllabusSyncResult {
   error?: string;
 }
 
-const LOCAL_STORAGE_DB_CACHE_KEY = 'gate_da_db_synced_syllabus_v2';
-
-/**
- * Canonical syllabus tables (`subjects`, `topics`, `subtopics`) are strictly read-only for students.
- * Student learning progress is saved exclusively to user-owned tables (`profiles`, `subject_progress`, `tests`, `study_tasks`).
- */
-export async function saveSyllabusToDatabase(subjects: Subject[]): Promise<SyllabusSyncResult> {
-  const subjectsCount = subjects.length;
-  const topicsCount = subjects.reduce((acc, s) => acc + s.topics.length, 0);
-  const subtopicsCount = subjects.reduce(
-    (acc, s) => acc + s.topics.reduce((tAcc, t) => tAcc + (t.subtopics?.length || 0), 0),
-    0
-  );
-
-  return {
-    success: true,
-    subjectsSaved: subjectsCount,
-    topicsSaved: topicsCount,
-    subtopicsSaved: subtopicsCount,
-    isFromDatabase: false,
-    message: 'Official GATE DA 2028 academic syllabus is canonical and read-only. Personal progress is persisted to user-owned records.',
-  };
-}
-
-/**
- * Fetches real subjects, topics, and subtopics directly from the database.
- * If Supabase contains subjects and topics, it reconstructs the syllabus tree
- * using the real database records.
- */
-export async function fetchSyllabusFromDatabase(fallbackSubjects: Subject[]): Promise<{
+export interface SyllabusLoadResult {
   subjects: Subject[];
   isFromDatabase: boolean;
   stats: { subjectsCount: number; topicsCount: number; subtopicsCount: number };
   message: string;
-}> {
-  try {
-    // 1. Query Supabase subjects, topics, and subtopics tables
-    const [subRes, topRes, subtopRes] = await Promise.all([
-      supabase.from('subjects').select('*'),
-      supabase.from('topics').select('*'),
-      supabase.from('subtopics').select('*'),
-    ]);
+}
 
-    const dbSubjects: Array<{ id: string; name: string; code: string }> = subRes.data || [];
-    const dbTopics: Array<{ id: string; name: string; subject_id: string }> = topRes.data || [];
-    const dbSubtopics: Array<{ id: string; name: string; topic_id: string }> = subtopRes.data || [];
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-    // 2. If the database returned records, build the syllabus from the database!
-    if (dbSubjects.length > 0 && dbTopics.length > 0) {
-      // Group subtopics by topic_id
-      const subtopicsByTopic = new Map<string, string[]>();
-      for (const st of dbSubtopics) {
-        const arr = subtopicsByTopic.get(st.topic_id) || [];
-        arr.push(st.name);
-        subtopicsByTopic.set(st.topic_id, arr);
-      }
-
-      // Group topics by subject_id
-      const topicsBySubject = new Map<string, typeof dbTopics>();
-      for (const t of dbTopics) {
-        const arr = topicsBySubject.get(t.subject_id) || [];
-        arr.push(t);
-        topicsBySubject.set(t.subject_id, arr);
-      }
-
-      // Reconstruct Subject list from real database rows
-      const reconstructed: Subject[] = dbSubjects.map((dbSub) => {
-        // Find matching fallback subject for metadata (colors, descriptions, formulas)
-        const match = fallbackSubjects.find(
-          (s) => s.shortCode?.toLowerCase() === dbSub.code?.toLowerCase() ||
-                 s.name.toLowerCase() === dbSub.name.toLowerCase() ||
-                 getDeterministicUuid(`sub_${s.id}`) === dbSub.id
-        );
-
-        const assignedTopics = topicsBySubject.get(dbSub.id) || [];
-
-        const mappedTopics: Topic[] = assignedTopics.map((dt) => {
-          const matchingFallbackTopic = match?.topics.find(
-            (ft) => ft.title.toLowerCase() === dt.name.toLowerCase() ||
-                   getDeterministicUuid(`top_${ft.id}`) === dt.id
-          );
-
-          const liveSubtopics = subtopicsByTopic.get(dt.id) || matchingFallbackTopic?.subtopics || [];
-
-          return {
-            id: matchingFallbackTopic?.id || dt.id,
-            subjectId: match?.id || 'prob_stat',
-            title: dt.name,
-            subtopics: liveSubtopics,
-            weightageTier: matchingFallbackTopic?.weightageTier || 'Core (Medium)',
-            status: matchingFallbackTopic?.status || 'unvisited',
-            confidenceScore: matchingFallbackTopic?.confidenceScore || 3,
-            lastRevised: matchingFallbackTopic?.lastRevised,
-            nextRevisionDue: matchingFallbackTopic?.nextRevisionDue,
-            pyqsTotal: matchingFallbackTopic?.pyqsTotal || 30,
-            pyqsSolved: matchingFallbackTopic?.pyqsSolved || 15,
-            pyqAccuracy: matchingFallbackTopic?.pyqAccuracy || 80,
-            formulas: matchingFallbackTopic?.formulas || [],
-            commonTraps: matchingFallbackTopic?.commonTraps || [],
-            notes: matchingFallbackTopic?.notes,
-          };
-        });
-
-        return {
-          id: match?.id || (dbSub.code as SubjectId) || 'prob_stat',
-          name: dbSub.name,
-          shortCode: dbSub.code || match?.shortCode || 'MOD',
-          weightageMarks: match?.weightageMarks || '10-15 Marks',
-          approxQuestions: match?.approxQuestions || 8,
-          color: match?.color || '#4f46e5',
-          bgLight: match?.bgLight || '#eef2ff',
-          borderColor: match?.borderColor || '#c7d2fe',
-          description: match?.description || `${dbSub.name} module for GATE DA`,
-          recommendedBooks: match?.recommendedBooks || [],
-          topics: mappedTopics.length > 0 ? mappedTopics : (match?.topics || []),
-        };
-      });
-
-      return {
-        subjects: reconstructed,
-        isFromDatabase: true,
-        stats: {
-          subjectsCount: dbSubjects.length,
-          topicsCount: dbTopics.length,
-          subtopicsCount: dbSubtopics.length,
-        },
-        message: `Loaded ${dbSubjects.length} subjects, ${dbTopics.length} topics, and ${dbSubtopics.length} subtopics directly from Supabase database.`,
-      };
-    }
-
-    // 3. If database tables are currently empty, try automatic seed/sync to DB
-    const syncRes = await saveSyllabusToDatabase(fallbackSubjects);
-
-    // Return the verified IIT Madras curriculum
-    let totalTopics = 0;
-    let totalSubtopics = 0;
-    fallbackSubjects.forEach((s) => {
-      totalTopics += s.topics.length;
-      s.topics.forEach((t) => {
-        totalSubtopics += t.subtopics.length;
-      });
-    });
-
-    return {
-      subjects: fallbackSubjects,
-      isFromDatabase: syncRes.isFromDatabase,
-      stats: {
-        subjectsCount: fallbackSubjects.length,
-        topicsCount: totalTopics,
-        subtopicsCount: totalSubtopics,
-      },
-      message: syncRes.success
-        ? `Database seeded! Loaded ${fallbackSubjects.length} subjects, ${totalTopics} topics, and ${totalSubtopics} subtopics.`
-        : `Database connected. Ready with ${fallbackSubjects.length} subjects, ${totalTopics} topics, and ${totalSubtopics} official IIT Madras subtopics.`,
-    };
-  } catch (err: any) {
-    console.warn('fetchSyllabusFromDatabase notice:', err);
-    let totalTopics = 0;
-    let totalSubtopics = 0;
-    fallbackSubjects.forEach((s) => {
-      totalTopics += s.topics.length;
-      s.topics.forEach((t) => {
-        totalSubtopics += t.subtopics.length;
-      });
-    });
-
-    return {
-      subjects: fallbackSubjects,
-      isFromDatabase: false,
-      stats: {
-        subjectsCount: fallbackSubjects.length,
-        topicsCount: totalTopics,
-        subtopicsCount: totalSubtopics,
-      },
-      message: `Database connected. Active with ${fallbackSubjects.length} subjects, ${totalTopics} topics, and ${totalSubtopics} subtopics.`,
-    };
+function getTopicStatus(status: string | null | undefined): TopicStatus {
+  if (status === 'completed' || status === 'in_progress' || status === 'revision_due') {
+    return status;
   }
+  return 'unvisited';
+}
+
+function getWeightageTier(tier: string | null | undefined): Topic['weightageTier'] {
+  if (tier === 'Critical (High)' || tier === 'Core (Medium)') return tier;
+  return 'Foundational';
+}
+
+/** Saves the current user's frontend-created syllabus in parent-first order. */
+export async function saveSyllabusToDatabase(
+  subjects: Subject[],
+  ownerId: string
+): Promise<SyllabusSyncResult> {
+  let subjectsSaved = 0;
+  let topicsSaved = 0;
+  let subtopicsSaved = 0;
+
+  const failure = (message: string): SyllabusSyncResult => ({
+    success: false,
+    subjectsSaved,
+    topicsSaved,
+    subtopicsSaved,
+    isFromDatabase: false,
+    message,
+    error: message,
+  });
+
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) return failure(`Could not verify Supabase session: ${sessionError.message}`);
+  if (!session || session.user.id !== ownerId) {
+    return failure('Sign in with the account that owns this syllabus before saving.');
+  }
+
+  const dbSubjects: Array<{ id: string; owner_id: string; name: string; code: string; sort_order: number }> = [];
+  const dbTopics: Array<{
+    id: string;
+    owner_id: string;
+    subject_id: string;
+    name: string;
+    sort_order: number;
+  }> = [];
+  const dbSubtopics: Array<{
+    id: string;
+    owner_id: string;
+    topic_id: string;
+    name: string;
+    sort_order: number;
+  }> = [];
+
+  subjects.forEach((subject, subjectIndex) => {
+    const subjectId = UUID_PATTERN.test(subject.id)
+      ? subject.id
+      : getDeterministicUuid(`sub_${subject.id}`);
+
+    dbSubjects.push({
+      id: subjectId,
+      owner_id: ownerId,
+      name: subject.name,
+      code: subject.shortCode || subject.id,
+      sort_order: subjectIndex,
+    });
+
+    subject.topics.forEach((topic, topicIndex) => {
+      const topicId = UUID_PATTERN.test(topic.id)
+        ? topic.id
+        : getDeterministicUuid(`top_${topic.id}`);
+
+      dbTopics.push({
+        id: topicId,
+        owner_id: ownerId,
+        subject_id: subjectId,
+        name: topic.title,
+        sort_order: topicIndex,
+      });
+
+      topic.subtopics.forEach((subtopic, subtopicIndex) => {
+        dbSubtopics.push({
+          id: getDeterministicUuid(`subtop_${topic.id}_${subtopicIndex}`),
+          owner_id: ownerId,
+          topic_id: topicId,
+          name: subtopic,
+          sort_order: subtopicIndex,
+        });
+      });
+    });
+  });
+
+  if (dbSubjects.length > 0) {
+    const { data, error } = await supabase
+      .from('subjects')
+      .upsert(dbSubjects, { onConflict: 'id' })
+      .select('id');
+    if (error) return failure(`Could not save subjects: ${error.message}`);
+    subjectsSaved = data?.length || 0;
+  }
+
+  if (dbTopics.length > 0) {
+    const { data, error } = await supabase
+      .from('topics')
+      .upsert(dbTopics, { onConflict: 'id' })
+      .select('id');
+    if (error) return failure(`Could not save topics: ${error.message}`);
+    topicsSaved = data?.length || 0;
+  }
+
+  if (dbSubtopics.length > 0) {
+    const { data, error } = await supabase
+      .from('subtopics')
+      .upsert(dbSubtopics, { onConflict: 'id' })
+      .select('id');
+    if (error) return failure(`Could not save subtopics: ${error.message}`);
+    subtopicsSaved = data?.length || 0;
+  }
+
+  return {
+    success: true,
+    subjectsSaved,
+    topicsSaved,
+    subtopicsSaved,
+    isFromDatabase: true,
+    message: `Saved ${subjectsSaved} subjects, ${topicsSaved} topics, and ${subtopicsSaved} subtopics.`,
+  };
+}
+
+/** Loads only the signed-in user's syllabus; an empty result is a valid blank start. */
+export async function fetchSyllabusFromDatabase(ownerId: string): Promise<SyllabusLoadResult> {
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) throw new Error(`Could not verify Supabase session: ${sessionError.message}`);
+  if (!session || session.user.id !== ownerId) {
+    throw new Error('An active Supabase session for this account is required to load its syllabus.');
+  }
+
+  const [subjectResult, topicResult, subtopicResult] = await Promise.all([
+    supabase.from('subjects').select('id, owner_id, name, code, sort_order')
+      .eq('owner_id', ownerId).order('sort_order', { ascending: true }),
+    supabase.from('topics').select('id, owner_id, subject_id, name, sort_order, average_score, score, confidence_score, pyq_accuracy, accuracy, status, weightage_tier, pyqs_solved, pyqs_total')
+      .eq('owner_id', ownerId).order('sort_order', { ascending: true }),
+    supabase.from('subtopics').select('id, owner_id, topic_id, name, sort_order')
+      .eq('owner_id', ownerId).order('sort_order', { ascending: true }),
+  ]);
+
+  const queryError = subjectResult.error || topicResult.error || subtopicResult.error;
+  if (queryError) throw new Error(`Could not load syllabus: ${queryError.message}`);
+
+  const dbSubjects = subjectResult.data || [];
+  const dbTopics = topicResult.data || [];
+  const dbSubtopics = subtopicResult.data || [];
+  const topicsBySubject = new Map<string, typeof dbTopics>();
+  const subtopicsByTopic = new Map<string, typeof dbSubtopics>();
+
+  dbTopics.forEach((topic) => {
+    const rows = topicsBySubject.get(topic.subject_id) || [];
+    rows.push(topic);
+    topicsBySubject.set(topic.subject_id, rows);
+  });
+  dbSubtopics.forEach((subtopic) => {
+    const rows = subtopicsByTopic.get(subtopic.topic_id) || [];
+    rows.push(subtopic);
+    subtopicsByTopic.set(subtopic.topic_id, rows);
+  });
+
+  const loadedSubjects: Subject[] = dbSubjects.map((subject) => ({
+    id: subject.id,
+    name: subject.name,
+    shortCode: subject.code,
+    weightageMarks: '',
+    approxQuestions: 0,
+    color: '#4f46e5',
+    bgLight: '#eef2ff',
+    borderColor: '#c7d2fe',
+    description: '',
+    recommendedBooks: [],
+    topics: (topicsBySubject.get(subject.id) || []).map((topic) => ({
+      id: topic.id,
+      subjectId: subject.id,
+      title: topic.name,
+      subtopics: (subtopicsByTopic.get(topic.id) || []).map((subtopic) => subtopic.name),
+      weightageTier: getWeightageTier(topic.weightage_tier),
+      status: getTopicStatus(topic.status),
+      confidenceScore: Number(topic.confidence_score ?? 3),
+      pyqsTotal: Number(topic.pyqs_total ?? 0),
+      pyqsSolved: Number(topic.pyqs_solved ?? 0),
+      pyqAccuracy: Number(topic.pyq_accuracy ?? topic.accuracy ?? 0),
+      formulas: [],
+      commonTraps: [],
+    })),
+  }));
+
+  return {
+    subjects: loadedSubjects,
+    isFromDatabase: true,
+    stats: {
+      subjectsCount: dbSubjects.length,
+      topicsCount: dbTopics.length,
+      subtopicsCount: dbSubtopics.length,
+    },
+    message: dbSubjects.length
+      ? `Loaded ${dbSubjects.length} subjects, ${dbTopics.length} topics, and ${dbSubtopics.length} subtopics.`
+      : 'No syllabus entries yet. Add your first subject from the Subjects page.',
+  };
 }

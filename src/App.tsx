@@ -44,7 +44,7 @@ const MainAppContent: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isTourOpen, setIsTourOpen] = useState(false);
 
-  const [selectedSubjectId, setSelectedSubjectId] = useState<SubjectId | undefined>('linear_algebra');
+  const [selectedSubjectId, setSelectedSubjectId] = useState<SubjectId | undefined>(undefined);
   const [selectedFormulaId, setSelectedFormulaId] = useState<string | null>(null);
 
   // Global keyboard shortcut for Omnibox (Cmd+K / Ctrl+K)

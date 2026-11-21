@@ -39,6 +39,7 @@ import {
 } from '../../data/subjectResources';
 import { ResourceViewerModal } from '../modals/ResourceViewerModal';
 import { AddResourceModal } from '../modals/AddResourceModal';
+import { SyllabusEntryModal, SyllabusEntryTarget } from '../modals/SyllabusEntryModal';
 
 interface SubjectsViewProps {
   initialSubjectId?: SubjectId;
@@ -54,17 +55,19 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
     currentUser,
     updateTopicStatus,
     updateTopicConfidence,
-    isDbConnected,
-    isSyncingDb,
-    dbSyncMessage,
     dbStats,
+    addSubject,
+    addTopic,
+    addSubtopic,
+    setIsAuthModalOpen,
   } = useStudy();
 
   const [activeSubjectId, setActiveSubjectId] = useState<SubjectId>(
-    initialSubjectId || 'prob_stat'
+    initialSubjectId || ''
   );
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [expandedTopicId, setExpandedTopicId] = useState<string | null>(null);
+  const [entryTarget, setEntryTarget] = useState<SyllabusEntryTarget | null>(null);
 
   // Resource Modals State
   const [selectedResource, setSelectedResource] = useState<StudyResource | null>(null);
@@ -81,17 +84,24 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
 
   const activeSubject = subjects.find((s) => s.id === activeSubjectId) || subjects[0];
 
-  const filteredTopics = activeSubject.topics.filter((t) => {
+  const filteredTopics = (activeSubject?.topics || []).filter((t) => {
     if (statusFilter === 'all') return true;
     return t.status === statusFilter;
   });
 
-  const completedCount = activeSubject.topics.filter((t) => t.status === 'completed').length;
-  const totalCount = activeSubject.topics.length;
+  const completedCount = (activeSubject?.topics || []).filter((t) => t.status === 'completed').length;
+  const totalCount = activeSubject?.topics.length || 0;
   const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+  const canManageSyllabus = Boolean(
+    currentUser &&
+    !currentUser.id.startsWith('demo_') &&
+    !currentUser.id.startsWith('guest_') &&
+    !currentUser.id.includes('aspirant')
+  );
 
   // Active Subject Resources (Default standard + user custom)
   const activeSubjectResources = useMemo(() => {
+    if (!activeSubject) return [];
     const defaults = DEFAULT_SUBJECT_RESOURCES[activeSubject.id] || [];
     const customs = customResourcesMap[activeSubject.id] || [];
     const combined = [...defaults, ...customs];
@@ -103,14 +113,14 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
       return combined.filter((r) => r.type === 'video_tutorial');
     }
     return combined;
-  }, [activeSubject.id, customResourcesMap, resourceFormatFilter]);
+  }, [activeSubject?.id, customResourcesMap, resourceFormatFilter]);
 
-  const booksCount = (DEFAULT_SUBJECT_RESOURCES[activeSubject.id] || [])
-    .concat(customResourcesMap[activeSubject.id] || [])
+  const booksCount = (DEFAULT_SUBJECT_RESOURCES[activeSubject?.id || ''] || [])
+    .concat(customResourcesMap[activeSubject?.id || ''] || [])
     .filter((r) => r.type === 'book_pdf').length;
 
-  const videosCount = (DEFAULT_SUBJECT_RESOURCES[activeSubject.id] || [])
-    .concat(customResourcesMap[activeSubject.id] || [])
+  const videosCount = (DEFAULT_SUBJECT_RESOURCES[activeSubject?.id || ''] || [])
+    .concat(customResourcesMap[activeSubject?.id || ''] || [])
     .filter((r) => r.type === 'video_tutorial').length;
 
   // Handler for adding custom resource
@@ -126,9 +136,60 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
     setCustomResourcesMap(updated);
   };
 
+  const openSyllabusEntry = (target: SyllabusEntryTarget) => {
+    if (!canManageSyllabus) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+    setEntryTarget(target);
+  };
+
+  const syllabusEntryModal = (
+    <SyllabusEntryModal
+      target={entryTarget}
+      onClose={() => setEntryTarget(null)}
+      onAddSubject={addSubject}
+      onAddTopic={addTopic}
+      onAddSubtopic={addSubtopic}
+    />
+  );
+
+  if (!activeSubject) {
+    return (
+      <div className="space-y-6 pb-12">
+        <section className="bg-white rounded-xl border border-slate-200 p-6 shadow-2xs">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-700 shrink-0">
+              <BookOpen className="w-5 h-5" />
+            </div>
+            <div className="flex-1">
+              <h1 className="text-lg font-bold text-slate-900">Build your syllabus</h1>
+              <p className="text-sm text-slate-600 mt-1">
+                No subjects yet. Add a subject, then create its topics and subtopics here.
+              </p>
+              <button
+                onClick={() => openSyllabusEntry({ kind: 'subject' })}
+                className="mt-4 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold inline-flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Add your first subject
+              </button>
+              {!canManageSyllabus && (
+                <p className="text-xs text-amber-700 mt-2">
+                  Sign in with a Supabase account to save syllabus entries.
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+        {syllabusEntryModal}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 pb-12">
-      {/* Official Syllabus Overview Banner */}
+      {/* User-created syllabus overview */}
       <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
@@ -138,19 +199,26 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-sm font-bold text-slate-900">
-                  Official GATE DA 2028 Curriculum Tree
+                  Your Study Syllabus
                 </h1>
                 <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-semibold">
-                  IISc / IIT Canonical
+                  {dbStats.subjectsCount} subjects
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                8 Comprehensive Modules · 85 Exam Micro-Topics · Active Confidence &amp; Spaced Revision Tracking
+                {dbStats.topicsCount} topics · {dbStats.subtopicsCount} subtopics
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => openSyllabusEntry({ kind: 'subject' })}
+              className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Subject</span>
+            </button>
             <button
               onClick={onOpenFormulaVault}
               className="px-3.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -162,7 +230,7 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
         </div>
       </section>
 
-      {/* 9 Subjects Horizontal Selector Bar */}
+      {/* Subject selector */}
       <section className="bg-white rounded-xl border border-slate-200 p-2 shadow-2xs overflow-x-auto">
         <div className="flex items-center gap-1.5 min-w-max">
           {subjects.map((sub) => {
@@ -210,39 +278,31 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
       {/* Active Subject Header Card */}
       <section className="bg-white rounded-xl border border-slate-200 p-6 shadow-2xs flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div className="space-y-2 max-w-2xl">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-indigo-700 font-mono">
-              OFFICIAL SYLLABUS MODULE
-            </span>
-            <span className="text-slate-300">·</span>
-            <span className="text-xs font-semibold text-slate-700">
-              {activeSubject.weightageMarks}
-            </span>
-            <span className="text-slate-300">·</span>
-            <span className="text-xs text-slate-500">
-              ~{activeSubject.approxQuestions} Questions in CBT
-            </span>
-          </div>
+          <span className="text-xs font-bold text-indigo-700 font-mono">
+            SUBJECT · {activeSubject.shortCode}
+          </span>
 
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
             {activeSubject.name}
           </h1>
 
-          <p className="text-xs text-slate-600 leading-relaxed">
-            {activeSubject.description}
-          </p>
+          {activeSubject.description && (
+            <p className="text-xs text-slate-600 leading-relaxed">{activeSubject.description}</p>
+          )}
 
-          <div className="pt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
-            <span className="font-semibold text-slate-700">Standard Textbooks:</span>
-            {activeSubject.recommendedBooks.map((book, i) => (
-              <span
-                key={i}
-                className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-[11px] font-medium"
-              >
-                {book}
-              </span>
-            ))}
-          </div>
+          {activeSubject.recommendedBooks.length > 0 && (
+            <div className="pt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+              <span className="font-semibold text-slate-700">Recommended books:</span>
+              {activeSubject.recommendedBooks.map((book, i) => (
+                <span
+                  key={i}
+                  className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-[11px] font-medium"
+                >
+                  {book}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Progress Metric Card */}
@@ -260,6 +320,17 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
           <div className="text-[11px] text-slate-500 font-mono">
             {completedCount} of {totalCount} Topics Mastered
           </div>
+          <button
+            onClick={() => openSyllabusEntry({
+              kind: 'topic',
+              subjectId: activeSubject.id,
+              subjectName: activeSubject.name,
+            })}
+            className="w-full mt-2 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold inline-flex justify-center items-center gap-1.5"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add Topic
+          </button>
         </div>
       </section>
 
@@ -272,14 +343,14 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
                 <BookOpen className="w-3.5 h-3.5" />
               </div>
               <h2 className="text-sm font-bold text-slate-900">
-                Textbook PDFs &amp; Video Lecture Playlists
+                Resources for {activeSubject.name}
               </h2>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-bold border border-indigo-200">
                 {activeSubject.shortCode} Reference Vault
               </span>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Standard GATE DA textbooks, open access PDF chapters, and official video lecture courses.
+              Add your own PDFs, videos, and reference links for this subject.
             </p>
           </div>
 
@@ -672,9 +743,24 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
 
                     {/* Subtopics Checklist with direct resource triggers */}
                     <div>
-                      <h4 className="text-xs font-bold text-slate-800 mb-2">
-                        Subtopics &amp; Learning Objectives:
-                      </h4>
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-xs font-bold text-slate-800">
+                          Subtopics &amp; Learning Objectives:
+                        </h4>
+                        <button
+                          onClick={() => openSyllabusEntry({
+                            kind: 'subtopic',
+                            subjectId: activeSubject.id,
+                            subjectName: activeSubject.name,
+                            topicId: topic.id,
+                            topicName: topic.title,
+                          })}
+                          className="text-[11px] font-semibold text-indigo-700 hover:text-indigo-900 inline-flex items-center gap-1"
+                        >
+                          <Plus className="w-3 h-3" />
+                          Add subtopic
+                        </button>
+                      </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         {topic.subtopics.map((sub, idx) => {
                           // Find if any resource matches this subtopic
@@ -804,6 +890,7 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
         defaultSubtopicTitle={addResourceTargetSubtopic}
         onSaveResource={handleSaveResource}
       />
+      {syllabusEntryModal}
     </div>
   );
 };

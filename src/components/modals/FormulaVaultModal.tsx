@@ -35,19 +35,6 @@ interface EnrichedFormula extends FormulaItem {
 type VaultTheme = 'paper' | 'chalkboard';
 type CardDisplayMode = 'formula' | 'latex' | 'text';
 
-const SUBJECT_SHORT_PILLS: Array<{ id: string; label: string }> = [
-  { id: 'all', label: 'All Subjects' },
-  { id: 'prob_stat', label: 'P&S' },
-  { id: 'linear_algebra', label: 'LA' },
-  { id: 'calculus_opt', label: 'CALC' },
-  { id: 'dsa_python', label: 'DSA' },
-  { id: 'dbms_warehouse', label: 'DBMS' },
-  { id: 'machine_learning', label: 'ML' },
-  { id: 'artificial_intel', label: 'AI' },
-  { id: 'general_aptitude', label: 'GA' },
-  { id: 'mock_pyq', label: 'MOCK' },
-];
-
 /**
  * KaTeX Math Renderer Component
  */
@@ -94,6 +81,10 @@ export const FormulaVaultModal: React.FC<FormulaVaultModalProps> = ({
   selectedFormulaId,
 }) => {
   const { subjects } = useStudy();
+  const subjectPills = [
+    { id: 'all', label: 'All Subjects' },
+    ...subjects.map((subject) => ({ id: subject.id, label: subject.shortCode })),
+  ];
 
   const [theme, setTheme] = useState<VaultTheme>('chalkboard');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('all');
@@ -271,7 +262,7 @@ export const FormulaVaultModal: React.FC<FormulaVaultModalProps> = ({
         <div className="px-4 py-1.5 border-b border-slate-100 bg-[#fbfbff] flex flex-wrap items-center justify-between gap-2 shrink-0">
           {/* Subject Pills */}
           <div className="flex items-center gap-1 overflow-x-auto py-0.5 scrollbar-none">
-            {SUBJECT_SHORT_PILLS.map((pill) => {
+            {subjectPills.map((pill) => {
               const isSelected = selectedSubjectId === pill.id;
               return (
                 <button

@@ -161,11 +161,10 @@ export async function syncUserProfileAndProgressToDatabase(
     // 2. Upsert subject progress for each subject in subject_progress table
     let progressUpserted = 0;
     for (const sub of subjects) {
-      const subjectUuid = getDeterministicUuid(`sub_${sub.id}`);
       const { error: spErr } = await supabase.from('subject_progress').upsert(
         {
           student_id: user.id,
-          subject_id: subjectUuid,
+          subject_id: sub.id,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'student_id,subject_id' }

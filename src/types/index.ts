@@ -1,13 +1,4 @@
-export type SubjectId =
-  | 'prob_stat'
-  | 'linear_algebra'
-  | 'calculus_opt'
-  | 'dsa_python'
-  | 'dbms_warehouse'
-  | 'machine_learning'
-  | 'artificial_intel'
-  | 'general_aptitude'
-  | 'mock_pyq';
+export type SubjectId = string;
 
 export type TopicStatus = 'completed' | 'in_progress' | 'revision_due' | 'unvisited';
 export type TaskType = 'concept' | 'textbook' | 'pyq' | 'revision' | 'test';
