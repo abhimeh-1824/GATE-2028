@@ -58,8 +58,6 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
     isSyncingDb,
     dbSyncMessage,
     dbStats,
-    syncSyllabusToDb,
-    fetchSyllabusFromDb,
   } = useStudy();
 
   const [activeSubjectId, setActiveSubjectId] = useState<SubjectId>(

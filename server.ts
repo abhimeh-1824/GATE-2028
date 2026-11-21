@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { createClient, type User } from '@supabase/supabase-js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,12 +13,154 @@ const app = express();
 // Therefore, this Express app must always listen on port 3000.
 const PORT = 3000;
 
-// Body limit reduced from 15mb to 1mb to mitigate DoS vectors
+// Body limit reduced to 1mb to mitigate DoS vectors
 app.use(express.json({ limit: '1mb' }));
 
-// Cross-Applet Sync Storage (in-memory + local file cache with bounded limits)
-const MAX_STORED_APPLETS = 10;
-const appletSyncStorage = new Map<string, { payload: any; updatedAt: string }>();
+export interface AuthenticatedRequest extends Request {
+  user?: User;
+  verifiedUserId?: string;
+  userEmail?: string;
+}
+
+// Supabase client instance initialized with environment variables or canonical project fallback
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://ptastgrweqmxpnhttznb.supabase.co';
+const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_cKnX0Crxl2RUQwrCRY2KTg_E0LhoZD0';
+
+export const supabaseServer = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/**
+ * Safely parses and decodes the JWT payload to pre-validate structure and standard claims (exp, aud, sub).
+ */
+export function decodeJwtPayload(token: string): { valid: boolean; payload?: any; error?: string } {
+  const parts = token.split('.');
+  if (parts.length !== 3) {
+    return {
+      valid: false,
+      error: 'Malformed JWT: Token must have exactly three dot-separated segments (header.payload.signature).',
+    };
+  }
+
+  try {
+    const payloadBase64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = payloadBase64.padEnd(payloadBase64.length + ((4 - (payloadBase64.length % 4)) % 4), '=');
+    const jsonStr = Buffer.from(padded, 'base64').toString('utf8');
+    const payload = JSON.parse(jsonStr);
+    return { valid: true, payload };
+  } catch (err: any) {
+    return {
+      valid: false,
+      error: `Invalid JWT payload encoding: ${err?.message || 'Failed to decode base64 JSON payload'}`,
+    };
+  }
+}
+
+/**
+ * Express middleware that verifies incoming Supabase JWT Bearer tokens for API routes.
+ */
+export const verifySupabaseJwt = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({
+      success: false,
+      error: 'Authentication required: Missing Authorization header.',
+    });
+  }
+
+  if (!authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      success: false,
+      error: 'Authentication required: Authorization header must use Bearer scheme.',
+    });
+  }
+
+  const token = authHeader.slice(7).trim();
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: 'Authentication required: Bearer token cannot be empty.',
+    });
+  }
+
+  // 1. Inspect and pre-verify JWT payload
+  const decodeResult = decodeJwtPayload(token);
+  if (!decodeResult.valid || !decodeResult.payload) {
+    return res.status(401).json({
+      success: false,
+      error: decodeResult.error || 'Invalid JWT structure.',
+    });
+  }
+
+  const { exp, aud, sub } = decodeResult.payload;
+
+  // Check expiration timestamp
+  if (typeof exp === 'number') {
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    if (exp < nowEpoch) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication token has expired. Please refresh your session.',
+      });
+    }
+  }
+
+  // Validate audience
+  if (aud && aud !== 'authenticated') {
+    return res.status(401).json({
+      success: false,
+      error: `Invalid token audience: '${aud}'. Expected 'authenticated'.`,
+    });
+  }
+
+  // Validate subject claim
+  if (!sub || typeof sub !== 'string') {
+    return res.status(401).json({
+      success: false,
+      error: 'Invalid token subject (sub claim missing).',
+    });
+  }
+
+  // 2. Cryptographic signature and revocation validation via Supabase Auth service
+  try {
+    const { data, error } = await supabaseServer.auth.getUser(token);
+    if (error || !data?.user || !data.user.id) {
+      return res.status(401).json({
+        success: false,
+        error: error?.message || 'Invalid, revoked, or unverified Supabase authentication session.',
+      });
+    }
+
+    // Verify sub claim matches authenticated user ID
+    if (data.user.id !== sub) {
+      return res.status(401).json({
+        success: false,
+        error: 'Token identity mismatch between claims and user record.',
+      });
+    }
+
+    // Attach verified user identity to the Express request
+    req.user = data.user;
+    req.verifiedUserId = data.user.id;
+    req.userEmail = data.user.email;
+
+    next();
+  } catch (err: any) {
+    return res.status(401).json({
+      success: false,
+      error: `Authentication verification failed: ${err?.message || 'Internal auth check error'}`,
+    });
+  }
+};
+
+// Alias requireSupabaseAuth for backward compatibility
+export const requireSupabaseAuth = verifySupabaseJwt;
+
+// Cross-Applet Sync Storage (in-memory + local file cache with bounded limits, scoped by userId:appletId)
+const MAX_STORED_APPLETS = 50;
+const appletSyncStorage = new Map<string, { userId: string; appletId: string; payload: any; updatedAt: string }>();
 const SYNC_CACHE_DIR = path.join(__dirname, '.sync_cache');
 if (!fs.existsSync(SYNC_CACHE_DIR)) {
   try {
@@ -116,91 +259,185 @@ function validateSyncPayload(body: any): { valid: boolean; error?: string } {
   return { valid: true };
 }
 
-app.post(['/api/sync/linked', `/api/sync/${LINKED_APPLET_ID}`, '/api/sync/:appletId'], apiRateLimiter, (req, res) => {
-  const rawId = req.params.appletId || LINKED_APPLET_ID;
-  const targetId = rawId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+app.post(
+  ['/api/sync/linked', `/api/sync/${LINKED_APPLET_ID}`, '/api/sync/:appletId'],
+  apiRateLimiter,
+  verifySupabaseJwt,
+  (req: AuthenticatedRequest, res: Response) => {
+    const rawId = req.params.appletId || LINKED_APPLET_ID;
+    const targetId = rawId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+    const userId = req.verifiedUserId;
 
-  // Authorize only allowed applet IDs
-  if (!targetId || !ALLOWED_APPLET_IDS.has(targetId)) {
-    return res.status(403).json({
-      success: false,
-      error: 'Unauthorized applet identifier. Access restricted to authorized applets.',
-    });
-  }
-
-  const payload = req.body;
-  const validation = validateSyncPayload(payload);
-  if (!validation.valid) {
-    return res.status(400).json({ success: false, error: validation.error || 'Invalid payload structure' });
-  }
-
-  // Bound memory storage
-  if (appletSyncStorage.size >= MAX_STORED_APPLETS && !appletSyncStorage.has(targetId)) {
-    const oldestKey = appletSyncStorage.keys().next().value;
-    if (oldestKey) appletSyncStorage.delete(oldestKey);
-  }
-
-  const updatedAt = new Date().toISOString();
-  appletSyncStorage.set(targetId, { payload, updatedAt });
-
-  try {
-    const cachePath = path.join(SYNC_CACHE_DIR, `${targetId}.json`);
-    fs.writeFileSync(cachePath, JSON.stringify({ payload, updatedAt }), 'utf8');
-  } catch (err) {
-    console.warn('Sync cache write notice:', err);
-  }
-
-  res.status(200).json({
-    success: true,
-    appletId: targetId,
-    updatedAt,
-    message: `State synchronized successfully for applet ${targetId}`,
-  });
-});
-
-app.get(['/api/sync/linked', `/api/sync/${LINKED_APPLET_ID}`, '/api/sync/:appletId'], apiRateLimiter, (req, res) => {
-  const rawId = req.params.appletId || LINKED_APPLET_ID;
-  const targetId = rawId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
-
-  if (!targetId || !ALLOWED_APPLET_IDS.has(targetId)) {
-    return res.status(403).json({
-      success: false,
-      error: 'Unauthorized applet identifier. Access restricted to authorized applets.',
-    });
-  }
-
-  let record = appletSyncStorage.get(targetId);
-
-  if (!record) {
-    try {
-      const cachePath = path.join(SYNC_CACHE_DIR, `${targetId}.json`);
-      if (fs.existsSync(cachePath)) {
-        const raw = fs.readFileSync(cachePath, 'utf8');
-        record = JSON.parse(raw);
-        if (record) {
-          appletSyncStorage.set(targetId, record);
-        }
-      }
-    } catch (err) {
-      console.warn('Sync cache read notice:', err);
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized user session.' });
     }
-  }
 
-  if (record) {
+    // Authorize only allowed applet IDs
+    if (!targetId || !ALLOWED_APPLET_IDS.has(targetId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Unauthorized applet identifier. Access restricted to authorized applets.',
+      });
+    }
+
+    const payload = req.body;
+    const validation = validateSyncPayload(payload);
+    if (!validation.valid) {
+      return res.status(400).json({ success: false, error: validation.error || 'Invalid payload structure' });
+    }
+
+    // Explicit data ownership check: Reject if client attempts to write data under someone else's identity
+    if (payload.user?.id && payload.user.id !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: You cannot modify sync data owned by another user account.',
+      });
+    }
+
+    // Strict ownership: override/bind payload user identity to the verified token user ID
+    payload.user = {
+      ...(payload.user || {}),
+      id: userId,
+      email: req.userEmail || payload.user?.email || '',
+    };
+
+    const storageKey = `${userId}:${targetId}`;
+
+    // Bound memory storage
+    if (appletSyncStorage.size >= MAX_STORED_APPLETS && !appletSyncStorage.has(storageKey)) {
+      const oldestKey = appletSyncStorage.keys().next().value;
+      if (oldestKey) appletSyncStorage.delete(oldestKey);
+    }
+
+    const updatedAt = new Date().toISOString();
+    appletSyncStorage.set(storageKey, { userId, appletId: targetId, payload, updatedAt });
+
+    try {
+      const safeUserFilename = userId.replace(/[^a-zA-Z0-9_-]/g, '');
+      const cachePath = path.join(SYNC_CACHE_DIR, `${safeUserFilename}_${targetId}.json`);
+      fs.writeFileSync(cachePath, JSON.stringify({ userId, appletId: targetId, payload, updatedAt }), 'utf8');
+    } catch (err) {
+      console.warn('Sync cache write notice:', err);
+    }
+
     res.status(200).json({
       success: true,
       appletId: targetId,
-      updatedAt: record.updatedAt,
-      payload: record.payload,
-    });
-  } else {
-    res.status(404).json({
-      success: false,
-      appletId: targetId,
-      message: `No active sync state found for applet ${targetId}`,
+      userId,
+      updatedAt,
+      message: `State synchronized successfully for applet ${targetId}`,
     });
   }
-});
+);
+
+app.get(
+  ['/api/sync/linked', `/api/sync/${LINKED_APPLET_ID}`, '/api/sync/:appletId'],
+  apiRateLimiter,
+  verifySupabaseJwt,
+  (req: AuthenticatedRequest, res: Response) => {
+    const rawId = req.params.appletId || LINKED_APPLET_ID;
+    const targetId = rawId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+    const userId = req.verifiedUserId;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized user session.' });
+    }
+
+    if (!targetId || !ALLOWED_APPLET_IDS.has(targetId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Unauthorized applet identifier. Access restricted to authorized applets.',
+      });
+    }
+
+    // Explicit data ownership check: Reject if client attempts to query another user's data
+    const requestedUserId = req.query.userId as string | undefined;
+    if (requestedUserId && requestedUserId !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: You cannot access sync data belonging to another user account.',
+      });
+    }
+
+    const storageKey = `${userId}:${targetId}`;
+    let record = appletSyncStorage.get(storageKey);
+
+    if (!record) {
+      try {
+        const safeUserFilename = userId.replace(/[^a-zA-Z0-9_-]/g, '');
+        const cachePath = path.join(SYNC_CACHE_DIR, `${safeUserFilename}_${targetId}.json`);
+        if (fs.existsSync(cachePath)) {
+          const raw = fs.readFileSync(cachePath, 'utf8');
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.userId === userId) {
+            record = parsed;
+            appletSyncStorage.set(storageKey, parsed);
+          }
+        }
+      } catch (err) {
+        console.warn('Sync cache read notice:', err);
+      }
+    }
+
+    if (record && record.userId === userId) {
+      res.status(200).json({
+        success: true,
+        appletId: targetId,
+        userId,
+        updatedAt: record.updatedAt,
+        payload: record.payload,
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        appletId: targetId,
+        message: `No active sync state found for user on applet ${targetId}`,
+      });
+    }
+  }
+);
+
+app.delete(
+  ['/api/sync/linked', `/api/sync/${LINKED_APPLET_ID}`, '/api/sync/:appletId'],
+  apiRateLimiter,
+  verifySupabaseJwt,
+  (req: AuthenticatedRequest, res: Response) => {
+    const rawId = req.params.appletId || LINKED_APPLET_ID;
+    const targetId = rawId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+    const userId = req.verifiedUserId;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized user session.' });
+    }
+
+    if (!targetId || !ALLOWED_APPLET_IDS.has(targetId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Unauthorized applet identifier. Access restricted to authorized applets.',
+      });
+    }
+
+    const storageKey = `${userId}:${targetId}`;
+    appletSyncStorage.delete(storageKey);
+
+    try {
+      const safeUserFilename = userId.replace(/[^a-zA-Z0-9_-]/g, '');
+      const cachePath = path.join(SYNC_CACHE_DIR, `${safeUserFilename}_${targetId}.json`);
+      if (fs.existsSync(cachePath)) {
+        fs.unlinkSync(cachePath);
+      }
+    } catch (err) {
+      console.warn('Sync cache delete notice:', err);
+    }
+
+    res.status(200).json({
+      success: true,
+      appletId: targetId,
+      userId,
+      message: `Sync state purged successfully for user on applet ${targetId}`,
+    });
+  }
+);
 
 // Serve static assets from dist
 const distPath = path.join(__dirname, 'dist');

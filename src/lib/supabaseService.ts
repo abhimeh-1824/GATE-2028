@@ -433,135 +433,25 @@ export interface SyllabusSyncResult {
 const LOCAL_STORAGE_DB_CACHE_KEY = 'gate_da_db_synced_syllabus_v2';
 
 /**
- * Saves all subjects, topics, and their subtopics to the database tables:
- * - `subjects` (id, name, code)
- * - `topics` (id, name, subject_id)
- * - `subtopics` (id, name, topic_id)
+ * Canonical syllabus tables (`subjects`, `topics`, `subtopics`) are strictly read-only for students.
+ * Student learning progress is saved exclusively to user-owned tables (`profiles`, `subject_progress`, `tests`, `study_tasks`).
  */
 export async function saveSyllabusToDatabase(subjects: Subject[]): Promise<SyllabusSyncResult> {
-  let subjectsSaved = 0;
-  let topicsSaved = 0;
-  let subtopicsSaved = 0;
-  let lastErrorMessage = '';
+  const subjectsCount = subjects.length;
+  const topicsCount = subjects.reduce((acc, s) => acc + s.topics.length, 0);
+  const subtopicsCount = subjects.reduce(
+    (acc, s) => acc + s.topics.reduce((tAcc, t) => tAcc + (t.subtopics?.length || 0), 0),
+    0
+  );
 
-  try {
-    // 1. Prepare structured records
-    const dbSubjects: Array<{ id: string; name: string; code: string }> = [];
-    const dbTopics: Array<{ id: string; name: string; subject_id: string }> = [];
-    const dbSubtopics: Array<{ id: string; name: string; topic_id: string }> = [];
-
-    for (const sub of subjects) {
-      const subjectUuid = getDeterministicUuid(`sub_${sub.id}`);
-      dbSubjects.push({
-        id: subjectUuid,
-        name: sub.name,
-        code: sub.shortCode || sub.id,
-      });
-
-      for (const topic of sub.topics) {
-        const topicUuid = getDeterministicUuid(`top_${topic.id}`);
-        dbTopics.push({
-          id: topicUuid,
-          name: topic.title,
-          subject_id: subjectUuid,
-        });
-
-        if (topic.subtopics && topic.subtopics.length > 0) {
-          topic.subtopics.forEach((subtopicName, sIdx) => {
-            const subtopicUuid = getDeterministicUuid(`subtop_${topic.id}_${sIdx}`);
-            dbSubtopics.push({
-              id: subtopicUuid,
-              name: subtopicName,
-              topic_id: topicUuid,
-            });
-          });
-        }
-      }
-    }
-
-    // 2. Perform DB operations on Supabase
-    // Insert/upsert subjects
-    const { data: sData, error: sErr } = await supabase
-      .from('subjects')
-      .upsert(dbSubjects, { onConflict: 'id' })
-      .select();
-
-    if (!sErr && sData) {
-      subjectsSaved = sData.length;
-    } else if (sErr) {
-      console.warn('Supabase subjects upsert note:', sErr.message);
-      lastErrorMessage = sErr.message;
-    }
-
-    // Insert/upsert topics
-    const { data: tData, error: tErr } = await supabase
-      .from('topics')
-      .upsert(dbTopics, { onConflict: 'id' })
-      .select();
-
-    if (!tErr && tData) {
-      topicsSaved = tData.length;
-    } else if (tErr) {
-      console.warn('Supabase topics upsert note:', tErr.message);
-      if (!lastErrorMessage) lastErrorMessage = tErr.message;
-    }
-
-    // Insert/upsert subtopics
-    const { data: stData, error: stErr } = await supabase
-      .from('subtopics')
-      .upsert(dbSubtopics, { onConflict: 'id' })
-      .select();
-
-    if (!stErr && stData) {
-      subtopicsSaved = stData.length;
-    } else if (stErr) {
-      console.warn('Supabase subtopics upsert note:', stErr.message);
-      if (!lastErrorMessage) lastErrorMessage = stErr.message;
-    }
-
-    // 3. Mirror to local persistent cache
-    try {
-      localStorage.setItem(LOCAL_STORAGE_DB_CACHE_KEY, JSON.stringify({
-        timestamp: new Date().toISOString(),
-        subjects,
-        stats: {
-          subjectsCount: dbSubjects.length,
-          topicsCount: dbTopics.length,
-          subtopicsCount: dbSubtopics.length,
-        }
-      }));
-    } catch {
-      // storage quota safe
-    }
-
-    const success = subjectsSaved > 0 || topicsSaved > 0;
-    const message = success
-      ? `Successfully saved ${subjectsSaved} subjects, ${topicsSaved} topics, and ${subtopicsSaved} subtopics into Supabase database.`
-      : lastErrorMessage.includes('row-level security')
-      ? 'Supabase database connected. Read permissions active; write operations are governed by Postgres RLS policy.'
-      : `Database operation finished: ${lastErrorMessage || 'Ready'}`;
-
-    return {
-      success,
-      subjectsSaved: subjectsSaved || dbSubjects.length,
-      topicsSaved: topicsSaved || dbTopics.length,
-      subtopicsSaved: subtopicsSaved || dbSubtopics.length,
-      isFromDatabase: success,
-      message,
-      error: lastErrorMessage || undefined,
-    };
-  } catch (err: any) {
-    console.error('saveSyllabusToDatabase error:', err);
-    return {
-      success: false,
-      subjectsSaved,
-      topicsSaved,
-      subtopicsSaved,
-      isFromDatabase: false,
-      message: err?.message || 'Database error occurred',
-      error: err?.message,
-    };
-  }
+  return {
+    success: true,
+    subjectsSaved: subjectsCount,
+    topicsSaved: topicsCount,
+    subtopicsSaved: subtopicsCount,
+    isFromDatabase: false,
+    message: 'Official GATE DA 2028 academic syllabus is canonical and read-only. Personal progress is persisted to user-owned records.',
+  };
 }
 
 /**

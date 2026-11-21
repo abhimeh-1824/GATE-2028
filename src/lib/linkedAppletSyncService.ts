@@ -209,19 +209,27 @@ export async function pushSyncToLinkedApplet(
     // storage safe
   }
 
-  // 3. Post to Node/Express server endpoint (only if not demo user)
-  if (!isDemo) {
+  // 3. Post to Node/Express server endpoint (only if verified authenticated session)
+  if (!isDemo && payload.user) {
     try {
-      const res = await fetch(`/api/sync/${DEFAULT_LINKED_APPLET_ID}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        serverSynced = true;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        const res = await fetch(`/api/sync/${DEFAULT_LINKED_APPLET_ID}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          serverSynced = true;
+        } else {
+          const errJson = await res.json().catch(() => ({}));
+          failureReasons.push(`Server API error (${res.status}): ${errJson.error || res.statusText}`);
+        }
       } else {
-        const errJson = await res.json().catch(() => ({}));
-        failureReasons.push(`Server API error (${res.status}): ${errJson.error || res.statusText}`);
+        failureReasons.push('No active Supabase session token available for server sync.');
       }
     } catch (err: any) {
       failureReasons.push(`Network server error: ${err?.message || 'Failed to reach sync endpoint'}`);
@@ -303,22 +311,29 @@ export async function pullSyncFromLinkedApplet(): Promise<{
   source: 'server' | 'supabase' | 'local' | 'none';
   message: string;
 }> {
-  // 1. Try server endpoint
+  // 1. Try server endpoint if session is active
   try {
-    const res = await fetch(`/api/sync/${DEFAULT_LINKED_APPLET_ID}`);
-    if (res.ok) {
-      const json = await res.json();
-      if (json && json.payload) {
-        const validated = validateAppletSyncPayload(json.payload);
-        if (validated.valid && validated.data) {
-          return {
-            success: true,
-            payload: validated.data,
-            source: 'server',
-            message: 'Received latest verified telemetry from Cloud Server.',
-          };
-        } else {
-          console.warn('Rejected invalid server sync payload schema:', validated.error);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      const res = await fetch(`/api/sync/${DEFAULT_LINKED_APPLET_ID}`, {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.payload) {
+          const validated = validateAppletSyncPayload(json.payload);
+          if (validated.valid && validated.data) {
+            return {
+              success: true,
+              payload: validated.data,
+              source: 'server',
+              message: 'Received latest verified telemetry from Cloud Server.',
+            };
+          } else {
+            console.warn('Rejected invalid server sync payload schema:', validated.error);
+          }
         }
       }
     }

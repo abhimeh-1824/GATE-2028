@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Calendar, Clock, BookOpen, AlertCircle, Edit3 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
-import { SubjectId, TaskType, PriorityLevel, Task } from '../../types';
+import { SubjectId, TaskType, PriorityLevel, Task, TaskStatus } from '../../types';
 
 interface AddTaskModalProps {
   isOpen: boolean;
@@ -10,7 +10,7 @@ interface AddTaskModalProps {
 }
 
 export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, taskToEdit }) => {
-  const { subjects, addTask, updateTask } = useStudy();
+  const { subjects, sprints, selectedSprintWeek, addTask, updateTask } = useStudy();
 
   const [title, setTitle] = useState('');
   const [subjectId, setSubjectId] = useState<SubjectId>('linear_algebra');
@@ -19,6 +19,9 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, tas
   const [durationMinutes, setDurationMinutes] = useState(45);
   const [scheduledTime, setScheduledTime] = useState('09:00 AM');
   const [priority, setPriority] = useState<PriorityLevel>('high');
+  const [status, setStatus] = useState<TaskStatus>('todo');
+  const [sprintWeek, setSprintWeek] = useState<string>('2026-W40');
+  const [storyPoints, setStoryPoints] = useState<number>(3);
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -33,6 +36,9 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, tas
         setDurationMinutes(taskToEdit.durationMinutes || 45);
         setScheduledTime(taskToEdit.scheduledTime || '09:00 AM');
         setPriority(taskToEdit.priority || 'high');
+        setStatus(taskToEdit.status || (taskToEdit.completed ? 'done' : 'todo'));
+        setSprintWeek(taskToEdit.sprintWeek || '2026-W40');
+        setStoryPoints(taskToEdit.storyPoints || 3);
         setNotes(taskToEdit.notes || '');
       } else {
         setTitle('');
@@ -43,11 +49,14 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, tas
         setDurationMinutes(45);
         setScheduledTime('09:00 AM');
         setPriority('high');
+        setStatus('todo');
+        setSprintWeek(selectedSprintWeek !== 'all' && selectedSprintWeek !== 'backlog' ? selectedSprintWeek : '2026-W40');
+        setStoryPoints(3);
         setNotes('');
       }
       setIsSubmitting(false);
     }
-  }, [isOpen, taskToEdit, subjects]);
+  }, [isOpen, taskToEdit, subjects, selectedSprintWeek]);
 
   // Handle Escape key
   useEffect(() => {
@@ -72,6 +81,8 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, tas
 
     setIsSubmitting(true);
 
+    const matchedSprint = sprints.find((s) => s.weekIdentifier === sprintWeek);
+
     if (taskToEdit) {
       updateTask(taskToEdit.id, {
         title: title.trim(),
@@ -81,6 +92,11 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, tas
         durationMinutes: Number(durationMinutes) || 30,
         scheduledTime,
         priority,
+        status,
+        completed: status === 'done',
+        sprintWeek: sprintWeek === 'none' ? undefined : sprintWeek,
+        sprintId: matchedSprint?.id,
+        storyPoints: Number(storyPoints),
         notes: notes.trim() || undefined,
       });
     } else {
@@ -90,7 +106,11 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, tas
         topicTitle: topicTitle || (availableTopics[0]?.title || 'Core Topic'),
         type,
         durationMinutes: Number(durationMinutes) || 30,
-        completed: false,
+        status,
+        completed: status === 'done',
+        sprintWeek: sprintWeek === 'none' ? undefined : sprintWeek,
+        sprintId: matchedSprint?.id,
+        storyPoints: Number(storyPoints),
         date: new Date().toISOString().split('T')[0],
         scheduledTime,
         priority,
@@ -231,6 +251,42 @@ export const AddTaskModal: React.FC<AddTaskModalProps> = ({ isOpen, onClose, tas
                 <option value="urgent">Critical (Urgent)</option>
                 <option value="high">High Yield</option>
                 <option value="normal">Normal</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Workflow Status
+              </label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as TaskStatus)}
+                className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg focus:border-indigo-600 outline-hidden bg-white"
+              >
+                <option value="todo">To Do / Backlog</option>
+                <option value="in_progress">In Progress</option>
+                <option value="review">Review / Practice</option>
+                <option value="done">Completed / Done</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                1-Week Sprint Week
+              </label>
+              <select
+                value={sprintWeek}
+                onChange={(e) => setSprintWeek(e.target.value)}
+                className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg focus:border-indigo-600 outline-hidden bg-white"
+              >
+                <option value="none">Backlog (Unassigned)</option>
+                {sprints.map((s) => (
+                  <option key={s.id} value={s.weekIdentifier}>
+                    {s.weekIdentifier} ({s.status})
+                  </option>
+                ))}
               </select>
             </div>
           </div>

@@ -2,6 +2,7 @@ import React from 'react';
 import {
   LayoutDashboard,
   CalendarCheck2,
+  Columns3,
   CalendarDays,
   BookOpen,
   MapPin,
@@ -73,6 +74,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: CalendarCheck2,
       badge: incompleteTasksCount > 0 ? `${incompleteTasksCount} tasks` : null,
       badgeColor: 'text-amber-700 bg-amber-50',
+    },
+    {
+      id: 'Kanban',
+      label: 'Kanban & Sprints',
+      icon: Columns3,
+      badge: '1-Wk Sprint',
+      badgeColor: 'text-indigo-700 bg-indigo-50 font-mono font-medium',
     },
     {
       id: 'Weekly',

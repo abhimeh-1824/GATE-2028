@@ -69,6 +69,8 @@ export interface Subject {
   resources?: StudyResource[];
 }
 
+export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done';
+
 export interface Task {
   id: string;
   title: string;
@@ -81,6 +83,43 @@ export interface Task {
   scheduledTime?: string; // e.g. "07:00 AM"
   priority: PriorityLevel;
   notes?: string;
+  status?: TaskStatus;
+  sprintId?: string;
+  sprintWeek?: string; // e.g. "2026-W40"
+  storyPoints?: number; // 1, 2, 3, 5, 8
+  orderIndex?: number;
+}
+
+export interface SprintRetrospective {
+  completedAt: string;
+  actualHours: number;
+  targetHours: number;
+  tasksCompleted: number;
+  totalTasks: number;
+  pointsCompleted: number;
+  totalPoints: number;
+  completionRate: number; // percentage
+  whatWentWell: string;
+  challengesFaced: string;
+  actionItemsNextSprint: string;
+  velocityRating: number; // 1 to 5 stars
+}
+
+export interface SprintPlan {
+  id: string;
+  name: string;
+  weekNumber: number;
+  year: number;
+  weekIdentifier: string; // e.g. "2026-W40"
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  status: 'active' | 'completed' | 'planned';
+  goal: string;
+  targetHours: number;
+  targetPoints: number;
+  focusSubjectIds?: SubjectId[];
+  retrospective?: SprintRetrospective;
+  createdAt: string;
 }
 
 export interface StudyLog {
@@ -160,6 +199,7 @@ export interface UserSettings {
   streakCount: number;
   userName: string;
   targetCollege: string; // e.g. "IISc Bangalore (M.Tech AI) / IIT Bombay"
+  shareProgressWithCohort?: boolean; // Privacy toggle for peer leaderboard
 }
 
 export interface LinkedAppletConfig {
@@ -212,6 +252,7 @@ export interface AuthUser {
   avatarUrl?: string;
   createdAt: string;
   isConfirmed?: boolean;
+  isDemo?: boolean;
 }
 
 export interface SubjectProgressSummary {

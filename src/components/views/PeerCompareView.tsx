@@ -39,6 +39,7 @@ export const PeerCompareView: React.FC = () => {
     totalHoursStudied,
     mockTests,
     settings,
+    updateSettings,
     setIsAuthModalOpen,
     linkedAppletConfig,
     syncWithLinkedApplet,
@@ -220,6 +221,25 @@ export const PeerCompareView: React.FC = () => {
                 {syncFeedback}
               </div>
             )}
+
+            <div className="pt-2 flex items-center justify-between text-xs border-t border-slate-200/80">
+              <label className="flex items-center gap-1.5 cursor-pointer select-none text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={settings.shareProgressWithCohort === true}
+                  onChange={(e) => {
+                    updateSettings({ shareProgressWithCohort: e.target.checked });
+                  }}
+                  className="rounded text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5"
+                />
+                <span className="text-[10px] font-semibold">
+                  {settings.shareProgressWithCohort === true ? 'Cohort Leaderboard: Active' : 'Private Mode: Active'}
+                </span>
+              </label>
+              <span className="text-[9px] text-slate-400">
+                {settings.shareProgressWithCohort === true ? 'Opt-in enabled' : 'Not listed'}
+              </span>
+            </div>
           </div>
         </div>
 

@@ -1,4 +1,4 @@
-import { Subject, Task, MockTest, Milestone, CalendarEvent, UserSettings } from '../types';
+import { Subject, Task, MockTest, Milestone, CalendarEvent, UserSettings, SprintPlan } from '../types';
 
 export const INITIAL_SETTINGS: UserSettings = {
   targetAir: 1,
@@ -9,6 +9,7 @@ export const INITIAL_SETTINGS: UserSettings = {
   streakCount: 14,
   userName: 'Rohit Sharma',
   targetCollege: 'IISc Bangalore (M.Tech AI) / IIT Bombay (CSE-AI)',
+  shareProgressWithCohort: false,
 };
 
 export const INITIAL_SUBJECTS: Subject[] = [
@@ -928,6 +929,68 @@ export const INITIAL_SUBJECTS: Subject[] = [
   }
 ];
 
+export const INITIAL_SPRINTS: SprintPlan[] = [
+  {
+    id: 'sprint_2026_w39',
+    name: 'Sprint 39: Linear Algebra SVD & Distribution Foundations',
+    weekNumber: 39,
+    year: 2026,
+    weekIdentifier: '2026-W39',
+    startDate: '2026-09-21',
+    endDate: '2026-09-27',
+    status: 'completed',
+    goal: 'Solidify SVD decomposition proofs, solve 30+ Eigenvalues PYQs, and master Poisson/Exponential distributions.',
+    targetHours: 28,
+    targetPoints: 20,
+    focusSubjectIds: ['linear_algebra', 'prob_stat'],
+    retrospective: {
+      completedAt: '2026-09-27T20:30:00Z',
+      actualHours: 27.5,
+      targetHours: 28,
+      tasksCompleted: 8,
+      totalTasks: 8,
+      pointsCompleted: 20,
+      totalPoints: 20,
+      completionRate: 100,
+      whatWentWell: 'Completed all 15 SVD practice questions in under 55 minutes with 93% accuracy. Formula Vault revision routine paid off.',
+      challengesFaced: 'Chi-Square degrees of freedom proof required 2 extra textbook passes.',
+      actionItemsNextSprint: 'Add timed 10-question drill sessions on Backprop Jacobians.',
+      velocityRating: 5,
+    },
+    createdAt: '2026-09-21T08:00:00Z',
+  },
+  {
+    id: 'sprint_2026_w40',
+    name: 'Sprint 40: ML Gradients, Bayes Nets & Relational Algebra',
+    weekNumber: 40,
+    year: 2026,
+    weekIdentifier: '2026-W40',
+    startDate: '2026-09-28',
+    endDate: '2026-10-04',
+    status: 'active',
+    goal: 'Derive Backpropagation on paper, master d-separation active recall, and achieve 100% on BCNF decomposition tests.',
+    targetHours: 28,
+    targetPoints: 18,
+    focusSubjectIds: ['machine_learning', 'artificial_intel', 'dbms_warehouse', 'dsa_python'],
+    createdAt: '2026-09-28T08:00:00Z',
+  },
+  {
+    id: 'sprint_2026_w41',
+    name: 'Sprint 41: Support Vector Machines & Asymptotic Complexity',
+    weekNumber: 41,
+    year: 2026,
+    weekIdentifier: '2026-W41',
+    startDate: '2026-10-05',
+    endDate: '2026-10-11',
+    status: 'planned',
+    goal: 'Master SVM Primal vs Dual Lagrangian formulations, KKT conditions, and solve 25 graph algorithm questions.',
+    targetHours: 30,
+    targetPoints: 22,
+    focusSubjectIds: ['machine_learning', 'dsa_python', 'calculus_opt'],
+    createdAt: '2026-09-28T08:00:00Z',
+  },
+];
+
 export const INITIAL_TASKS: Task[] = [
   {
     id: 'task_1',
@@ -937,10 +1000,14 @@ export const INITIAL_TASKS: Task[] = [
     type: 'pyq',
     durationMinutes: 60,
     completed: true,
-    date: '2026-09-24',
+    status: 'done',
+    sprintId: 'sprint_2026_w40',
+    sprintWeek: '2026-W40',
+    storyPoints: 3,
+    date: '2026-09-28',
     scheduledTime: '07:00 AM',
     priority: 'urgent',
-    notes: 'Master Eckart-Young theorem and sigma rank reduction calculations.'
+    notes: 'Master Eckart-Young theorem and sigma rank reduction calculations.',
   },
   {
     id: 'task_2',
@@ -950,10 +1017,14 @@ export const INITIAL_TASKS: Task[] = [
     type: 'textbook',
     durationMinutes: 45,
     completed: true,
-    date: '2026-09-24',
+    status: 'done',
+    sprintId: 'sprint_2026_w40',
+    sprintWeek: '2026-W40',
+    storyPoints: 2,
+    date: '2026-09-28',
     scheduledTime: '09:00 AM',
     priority: 'high',
-    notes: 'Focus on memoryless proofs and Poisson process inter-arrival times.'
+    notes: 'Focus on memoryless proofs and Poisson process inter-arrival times.',
   },
   {
     id: 'task_3',
@@ -963,10 +1034,14 @@ export const INITIAL_TASKS: Task[] = [
     type: 'concept',
     durationMinutes: 50,
     completed: false,
-    date: '2026-09-24',
+    status: 'in_progress',
+    sprintId: 'sprint_2026_w40',
+    sprintWeek: '2026-W40',
+    storyPoints: 5,
+    date: '2026-09-29',
     scheduledTime: '02:30 PM',
     priority: 'urgent',
-    notes: 'Use vector calculus notation with Jacobian matrices.'
+    notes: 'Use vector calculus notation with Jacobian matrices.',
   },
   {
     id: 'task_4',
@@ -976,10 +1051,14 @@ export const INITIAL_TASKS: Task[] = [
     type: 'revision',
     durationMinutes: 30,
     completed: false,
-    date: '2026-09-24',
+    status: 'review',
+    sprintId: 'sprint_2026_w40',
+    sprintWeek: '2026-W40',
+    storyPoints: 2,
+    date: '2026-09-30',
     scheduledTime: '04:30 PM',
     priority: 'high',
-    notes: 'Test active recall on collider vs non-collider paths with observed evidence.'
+    notes: 'Test active recall on collider vs non-collider paths with observed evidence.',
   },
   {
     id: 'task_5',
@@ -989,10 +1068,14 @@ export const INITIAL_TASKS: Task[] = [
     type: 'concept',
     durationMinutes: 45,
     completed: false,
-    date: '2026-09-24',
+    status: 'todo',
+    sprintId: 'sprint_2026_w40',
+    sprintWeek: '2026-W40',
+    storyPoints: 3,
+    date: '2026-10-01',
     scheduledTime: '06:00 PM',
     priority: 'normal',
-    notes: 'Verify heapq in Python vs custom indexed min-heap.'
+    notes: 'Verify heapq in Python vs custom indexed min-heap.',
   },
   {
     id: 'task_6',
@@ -1002,11 +1085,15 @@ export const INITIAL_TASKS: Task[] = [
     type: 'revision',
     durationMinutes: 40,
     completed: false,
-    date: '2026-09-24',
+    status: 'todo',
+    sprintId: 'sprint_2026_w40',
+    sprintWeek: '2026-W40',
+    storyPoints: 3,
+    date: '2026-10-02',
     scheduledTime: '08:30 PM',
     priority: 'high',
-    notes: 'Ensure mastery of Chase algorithm for lossless join testing.'
-  }
+    notes: 'Ensure mastery of Chase algorithm for lossless join testing.',
+  },
 ];
 
 export const INITIAL_MOCK_TESTS: MockTest[] = [

@@ -3,6 +3,9 @@ import {
   Subject,
   Topic,
   Task,
+  TaskStatus,
+  SprintPlan,
+  SprintRetrospective,
   MockTest,
   Milestone,
   CalendarEvent,
@@ -16,6 +19,7 @@ import {
 import {
   INITIAL_SUBJECTS,
   INITIAL_TASKS,
+  INITIAL_SPRINTS,
   INITIAL_MOCK_TESTS,
   INITIAL_MILESTONES,
   INITIAL_CALENDAR_EVENTS,
@@ -55,6 +59,8 @@ interface StudyContextType {
   // Auth & Multiple Users
   currentUser: AuthUser | null;
   allUsers: AuthUser[];
+  isDemo: boolean;
+  authLoading: boolean;
   isAuthModalOpen: boolean;
   setIsAuthModalOpen: (open: boolean) => void;
   login: (email: string, pass: string) => Promise<{ success: boolean; error?: string; needsEmailConfirmation?: boolean }>;
@@ -69,7 +75,7 @@ interface StudyContextType {
   switchUser: (userId: string) => void;
   loginAsDemo: () => void;
 
-  // Supabase Database Sync
+  // Supabase Database Sync (Read-only for canonical syllabus, user progress owned)
   isDbConnected: boolean;
   isSyncingDb: boolean;
   dbSyncMessage: string;
@@ -90,6 +96,9 @@ interface StudyContextType {
   // Study Data
   subjects: Subject[];
   tasks: Task[];
+  sprints: SprintPlan[];
+  selectedSprintWeek: string;
+  setSelectedSprintWeek: (week: string) => void;
   mockTests: MockTest[];
   milestones: Milestone[];
   calendarEvents: CalendarEvent[];
@@ -113,6 +122,13 @@ interface StudyContextType {
   addTask: (task: Omit<Task, 'id'>) => void;
   updateTask: (taskId: string, updates: Partial<Task>) => void;
   deleteTask: (taskId: string) => void;
+  moveTaskStatus: (taskId: string, newStatus: TaskStatus) => void;
+  assignTaskToSprint: (taskId: string, sprintId: string | null, sprintWeek?: string) => void;
+  bulkAssignTasksToSprint: (taskIds: string[], sprintId: string | null, sprintWeek?: string) => void;
+  createSprint: (sprint: Omit<SprintPlan, 'id' | 'createdAt'>) => void;
+  updateSprint: (sprintId: string, updates: Partial<SprintPlan>) => void;
+  completeSprint: (sprintId: string, retro: SprintRetrospective) => void;
+  deleteSprint: (sprintId: string) => void;
   updateTopicStatus: (subjectId: SubjectId, topicId: string, status: TopicStatus) => void;
   updateTopicConfidence: (subjectId: SubjectId, topicId: string, confidence: number) => void;
   addMockTest: (mock: Omit<MockTest, 'id'>) => void;
@@ -149,25 +165,46 @@ const StudyContext = createContext<StudyContextType | undefined>(undefined);
 const USER_DATA_PREFIX = 'gateda_2028_user_';
 
 export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Accounts and Current User
+  // Accounts and Current User State
   const [allUsers, setAllUsers] = useState<AuthUser[]>(() => getSavedAccounts());
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
-    const activeId = getActiveUserId();
-    if (!activeId) return null;
-    const saved = getSavedAccounts();
-    return saved.find((u) => u.id === activeId) || null;
-  });
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [isDemo, setIsDemo] = useState<boolean>(false);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [isSwitchingUser, setIsSwitchingUser] = useState<boolean>(false);
+
+  // Request generation token and abort controller to prevent race conditions during rapid switching
+  const switchGenerationRef = React.useRef<number>(0);
+  const switchAbortRef = React.useRef<AbortController | null>(null);
 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   // Helper to get user-specific storage key
   const getUserKey = (key: string, userId?: string) => {
-    const id = userId || currentUser?.id || 'guest';
+    const id = isDemo ? 'demo_sandbox' : userId || currentUser?.id || 'guest';
     return `${USER_DATA_PREFIX}${id}_${key}`;
   };
 
   // State initialization helper
-  const loadInitialData = (user: AuthUser | null) => {
+  const loadInitialData = (user: AuthUser | null, isDemoMode: boolean = false) => {
+    if (isDemoMode || user?.isDemo || user?.id?.startsWith('demo_')) {
+      return {
+        subjects: INITIAL_SUBJECTS,
+        tasks: INITIAL_TASKS,
+        sprints: INITIAL_SPRINTS,
+        mockTests: INITIAL_MOCK_TESTS,
+        milestones: INITIAL_MILESTONES,
+        calendarEvents: INITIAL_CALENDAR_EVENTS,
+        baseLoggedHours: 412.5,
+        settings: {
+          ...INITIAL_SETTINGS,
+          userName: 'Demo Aspirant',
+          targetAir: 1,
+          targetCollege: 'IISc Bangalore (M.Tech AI)',
+          shareProgressWithCohort: false,
+        },
+      };
+    }
+
     const id = user?.id || 'guest';
     const isNewUser = user && !localStorage.getItem(`${USER_DATA_PREFIX}${id}_initialized`);
 
@@ -178,6 +215,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return {
         subjects: createFreshZeroSubjects(),
         tasks: [],
+        sprints: INITIAL_SPRINTS,
         mockTests: [],
         milestones: INITIAL_MILESTONES,
         calendarEvents: [],
@@ -191,14 +229,16 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           streakCount: 1,
           userName: user.fullName || 'Aspirant',
           targetCollege: user.targetCollege || 'IISc Bangalore (M.Tech AI)',
+          shareProgressWithCohort: false,
         },
       };
     }
 
-    // Try loading existing user data
+    // Try loading existing user data from local cache
     try {
       const savedSubjects = localStorage.getItem(`${USER_DATA_PREFIX}${id}_subjects`);
       const savedTasks = localStorage.getItem(`${USER_DATA_PREFIX}${id}_tasks`);
+      const savedSprints = localStorage.getItem(`${USER_DATA_PREFIX}${id}_sprints`);
       const savedMocks = localStorage.getItem(`${USER_DATA_PREFIX}${id}_mockTests`);
       const savedMilestones = localStorage.getItem(`${USER_DATA_PREFIX}${id}_milestones`);
       const savedCal = localStorage.getItem(`${USER_DATA_PREFIX}${id}_calendarEvents`);
@@ -208,10 +248,11 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return {
         subjects: savedSubjects ? JSON.parse(savedSubjects) : (user ? createFreshZeroSubjects() : INITIAL_SUBJECTS),
         tasks: savedTasks ? JSON.parse(savedTasks) : (user ? [] : INITIAL_TASKS),
-        mockTests: savedMocks ? JSON.parse(savedMocks) : (user ? [] : INITIAL_MOCK_TESTS),
+        sprints: savedSprints ? JSON.parse(savedSprints) : INITIAL_SPRINTS,
+        mockTests: savedMocks ? JSON.parse(savedMocks) : [],
         milestones: savedMilestones ? JSON.parse(savedMilestones) : INITIAL_MILESTONES,
-        calendarEvents: savedCal ? JSON.parse(savedCal) : (user ? [] : INITIAL_CALENDAR_EVENTS),
-        baseLoggedHours: savedHours ? Number(savedHours) : (user ? 0.0 : 412.5),
+        calendarEvents: savedCal ? JSON.parse(savedCal) : [],
+        baseLoggedHours: savedHours ? Number(savedHours) : 0.0,
         settings: savedSettings
           ? JSON.parse(savedSettings)
           : user
@@ -224,6 +265,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               streakCount: 1,
               userName: user.fullName,
               targetCollege: user.targetCollege,
+              shareProgressWithCohort: false,
             }
           : INITIAL_SETTINGS,
       };
@@ -231,19 +273,22 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return {
         subjects: user ? createFreshZeroSubjects() : INITIAL_SUBJECTS,
         tasks: user ? [] : INITIAL_TASKS,
-        mockTests: user ? [] : INITIAL_MOCK_TESTS,
+        sprints: INITIAL_SPRINTS,
+        mockTests: [],
         milestones: INITIAL_MILESTONES,
-        calendarEvents: user ? [] : INITIAL_CALENDAR_EVENTS,
-        baseLoggedHours: user ? 0.0 : 412.5,
+        calendarEvents: [],
+        baseLoggedHours: 0.0,
         settings: INITIAL_SETTINGS,
       };
     }
   };
 
-  const initialData = loadInitialData(currentUser);
+  const initialData = loadInitialData(null);
 
   const [subjects, setSubjects] = useState<Subject[]>(initialData.subjects);
   const [tasks, setTasks] = useState<Task[]>(initialData.tasks);
+  const [sprints, setSprints] = useState<SprintPlan[]>(initialData.sprints || INITIAL_SPRINTS);
+  const [selectedSprintWeek, setSelectedSprintWeek] = useState<string>('2026-W40');
   const [mockTests, setMockTests] = useState<MockTest[]>(initialData.mockTests);
   const [milestones, setMilestones] = useState<Milestone[]>(initialData.milestones);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(initialData.calendarEvents);
@@ -253,7 +298,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Supabase Database Syllabus Sync
   const [isDbConnected, setIsDbConnected] = useState<boolean>(true);
   const [isSyncingDb, setIsSyncingDb] = useState<boolean>(false);
-  const [dbSyncMessage, setDbSyncMessage] = useState<string>('Connected to Supabase database');
+  const [dbSyncMessage, setDbSyncMessage] = useState<string>('Official syllabus verified and read-only');
   const [dbStats, setDbStats] = useState<{ subjectsCount: number; topicsCount: number; subtopicsCount: number }>({
     subjectsCount: initialData.subjects.length,
     topicsCount: initialData.subjects.reduce((acc: number, s: Subject) => acc + s.topics.length, 0),
@@ -286,6 +331,11 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const fetchSyllabusFromDb = useCallback(async () => {
+    // Only query database if user is authenticated and not demo
+    if (isDemo || !currentUser) {
+      setDbSyncMessage('Official syllabus loaded from canonical course definition');
+      return;
+    }
     setIsSyncingDb(true);
     try {
       const result = await fetchSyllabusFromDatabase(subjects);
@@ -301,49 +351,120 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } finally {
       setIsSyncingDb(false);
     }
-  }, [subjects]);
+  }, [subjects, isDemo, currentUser]);
 
+  // Canonical syllabus is strictly read-only for students
   const syncSyllabusToDb = useCallback(async () => {
-    setIsSyncingDb(true);
-    try {
-      const res = await saveSyllabusToDatabase(subjects);
-      setDbSyncMessage(res.message);
-      setDbStats({
-        subjectsCount: res.subjectsSaved,
-        topicsCount: res.topicsSaved,
-        subtopicsSaved: res.subtopicsSaved,
-      } as any);
-      if (res.success) {
-        soundManager.playCompletionChime();
-      }
-    } catch (e: any) {
-      console.warn('syncSyllabusToDb err:', e);
-      setDbSyncMessage(e?.message || 'Sync failed');
-    } finally {
-      setIsSyncingDb(false);
-    }
-  }, [subjects]);
+    setDbSyncMessage('Canonical curriculum is read-only. Your topic mastery and status are tracked in your profile.');
+    soundManager.playSubtleTick();
+  }, []);
 
-  // Initial DB check & Supabase auth listener on mount
+  // Supabase Auth Session Initialization & Lifecycle Listener on Mount
   useEffect(() => {
-    fetchSyllabusFromDatabase(initialData.subjects).then((res) => {
-      setDbStats(res.stats);
-      setDbSyncMessage(res.message);
-      if (res.isFromDatabase && res.subjects.length > 0) {
-        setSubjects(res.subjects);
+    let isMounted = true;
+
+    // Verify active Supabase session (Never trust localStorage identity alone)
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (!isMounted) return;
+      if (session?.user && !error) {
+        const sbUser = session.user;
+        const verifiedUser: AuthUser = {
+          id: sbUser.id,
+          email: sbUser.email || '',
+          fullName: sbUser.user_metadata?.full_name || 'Aspirant',
+          targetAir: Number(sbUser.user_metadata?.target_air) || 1,
+          targetCollege: sbUser.user_metadata?.target_college || 'IISc Bangalore (M.Tech AI)',
+          createdAt: sbUser.created_at || new Date().toISOString(),
+          isConfirmed: true,
+          isDemo: false,
+        };
+
+        saveAccountLocally(verifiedUser);
+        setActiveUserId(verifiedUser.id);
+        setCurrentUser(verifiedUser);
+        setIsDemo(false);
+        setAllUsers(getSavedAccounts());
+
+        // Load data for verified user
+        const userData = loadInitialData(verifiedUser, false);
+        setSubjects(userData.subjects);
+        setTasks(userData.tasks);
+        setSprints(userData.sprints || INITIAL_SPRINTS);
+        setMockTests(userData.mockTests);
+        setMilestones(userData.milestones);
+        setCalendarEvents(userData.calendarEvents);
+        setSettings(userData.settings);
+        setBaseLoggedHours(userData.baseLoggedHours);
+
+        // Fetch tasks from Supabase
+        loadTasksFromSupabase(verifiedUser.id).then((remoteTasks) => {
+          if (!isMounted) return;
+          if (remoteTasks.length > 0) {
+            setTasks((prev) => {
+              const merged = [...prev];
+              for (const rt of remoteTasks) {
+                if (!merged.some((m) => m.id === rt.id)) {
+                  merged.push(rt);
+                }
+              }
+              return merged;
+            });
+          }
+        });
+      } else {
+        // No active session: clean visitor state
+        setActiveUserId(null);
+        setCurrentUser(null);
+        setIsDemo(false);
       }
+      setAuthLoading(false);
     }).catch((err) => {
-      console.warn('Initial fetchSyllabusFromDatabase notice:', err);
+      if (!isMounted) return;
+      console.warn('Session verification notice:', err);
+      setActiveUserId(null);
+      setCurrentUser(null);
+      setIsDemo(false);
+      setAuthLoading(false);
     });
 
+    // Handle all Supabase auth lifecycle events
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT') {
-        setCurrentUser(null);
+      if (!isMounted) return;
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION') {
+        if (session?.user) {
+          const sbUser = session.user;
+          const verifiedUser: AuthUser = {
+            id: sbUser.id,
+            email: sbUser.email || '',
+            fullName: sbUser.user_metadata?.full_name || 'Aspirant',
+            targetAir: Number(sbUser.user_metadata?.target_air) || 1,
+            targetCollege: sbUser.user_metadata?.target_college || 'IISc Bangalore (M.Tech AI)',
+            createdAt: sbUser.created_at || new Date().toISOString(),
+            isConfirmed: true,
+            isDemo: false,
+          };
+          saveAccountLocally(verifiedUser);
+          setActiveUserId(verifiedUser.id);
+          setCurrentUser(verifiedUser);
+          setIsDemo(false);
+          setAllUsers(getSavedAccounts());
+        }
+      } else if (event === 'SIGNED_OUT') {
         setActiveUserId(null);
+        setCurrentUser(null);
+        setIsDemo(false);
+        setSubjects(createFreshZeroSubjects());
+        setTasks([]);
+        setSprints(INITIAL_SPRINTS);
+        setMockTests([]);
+        setCalendarEvents([]);
+        setBaseLoggedHours(0.0);
+        setSettings(INITIAL_SETTINGS);
       }
     });
 
     return () => {
+      isMounted = false;
       subscription.unsubscribe();
     };
   }, []);
@@ -367,86 +488,142 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     topicTitle: 'Projections, LU Decomposition & SVD',
   });
 
-  // Switch user handler
-  const switchUser = useCallback((userId: string) => {
+  // Switch user handler with request generation tokens and cancellation
+  const switchUser = useCallback(async (userId: string) => {
     const saved = getSavedAccounts();
     const target = saved.find((u) => u.id === userId);
     if (!target) return;
 
+    // Increment request generation and abort any pending task fetches from previous accounts
+    const currentGen = ++switchGenerationRef.current;
+    if (switchAbortRef.current) {
+      switchAbortRef.current.abort();
+    }
+    const abortController = new AbortController();
+    switchAbortRef.current = abortController;
+
+    // Suspend persistence during atomic state replacement
+    setIsSwitchingUser(true);
     setActiveUserId(target.id);
     setCurrentUser(target);
+    const targetIsDemo = target.isDemo || target.id.startsWith('demo_');
+    setIsDemo(targetIsDemo);
 
-    // Load new user's isolated data
-    const data = loadInitialData(target);
+    // Load new user's isolated data atomically
+    const data = loadInitialData(target, targetIsDemo);
     setSubjects(data.subjects);
     setTasks(data.tasks);
+    setSprints(data.sprints || INITIAL_SPRINTS);
     setMockTests(data.mockTests);
     setMilestones(data.milestones);
     setCalendarEvents(data.calendarEvents);
     setSettings(data.settings);
     setBaseLoggedHours(data.baseLoggedHours);
 
-    // Attempt to load tasks from Supabase cloud with user verification to prevent race conditions
-    loadTasksFromSupabase(target.id).then((remoteTasks) => {
-      if (getActiveUserId() !== target.id) return;
-      if (remoteTasks.length > 0) {
-        setTasks((prev) => {
-          const merged = [...prev];
-          for (const rt of remoteTasks) {
-            if (!merged.some((m) => m.id === rt.id)) {
-              merged.push(rt);
-            }
-          }
-          return merged;
-        });
-      }
-    });
+    // Resume persistence after all state slices have settled
+    setTimeout(() => {
+      setIsSwitchingUser(false);
+    }, 50);
 
     soundManager.playSubtleTick();
+
+    // If real user (not demo), verify Supabase session matches before fetching remote tasks
+    if (!targetIsDemo) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (
+          !abortController.signal.aborted &&
+          currentGen === switchGenerationRef.current &&
+          session?.user?.id === target.id
+        ) {
+          const remoteTasks = await loadTasksFromSupabase(target.id);
+          if (
+            !abortController.signal.aborted &&
+            currentGen === switchGenerationRef.current &&
+            getActiveUserId() === target.id
+          ) {
+            if (remoteTasks.length > 0) {
+              setTasks((prev) => {
+                const merged = [...prev];
+                for (const rt of remoteTasks) {
+                  if (!merged.some((m) => m.id === rt.id)) {
+                    merged.push(rt);
+                  }
+                }
+                return merged;
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('switchUser remote task load notice:', e);
+      }
+    }
   }, []);
 
-  // Save current user data whenever state updates
+  // Save current user data whenever state updates (strictly suspended during user transitions or loading)
   useEffect(() => {
-    const id = currentUser?.id || 'guest';
+    if (isSwitchingUser || authLoading) return;
+    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
+    if (!id) return;
     localStorage.setItem(`${USER_DATA_PREFIX}${id}_subjects`, JSON.stringify(subjects));
-  }, [subjects, currentUser?.id]);
+  }, [subjects, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
 
   useEffect(() => {
-    const id = currentUser?.id || 'guest';
+    if (isSwitchingUser || authLoading) return;
+    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
+    if (!id) return;
     localStorage.setItem(`${USER_DATA_PREFIX}${id}_tasks`, JSON.stringify(tasks));
-  }, [tasks, currentUser?.id]);
+  }, [tasks, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
 
   useEffect(() => {
-    const id = currentUser?.id || 'guest';
+    if (isSwitchingUser || authLoading) return;
+    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
+    if (!id) return;
+    localStorage.setItem(`${USER_DATA_PREFIX}${id}_sprints`, JSON.stringify(sprints));
+  }, [sprints, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
+
+  useEffect(() => {
+    if (isSwitchingUser || authLoading) return;
+    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
+    if (!id) return;
     localStorage.setItem(`${USER_DATA_PREFIX}${id}_mockTests`, JSON.stringify(mockTests));
-  }, [mockTests, currentUser?.id]);
+  }, [mockTests, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
 
   useEffect(() => {
-    const id = currentUser?.id || 'guest';
+    if (isSwitchingUser || authLoading) return;
+    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
+    if (!id) return;
     localStorage.setItem(`${USER_DATA_PREFIX}${id}_milestones`, JSON.stringify(milestones));
-  }, [milestones, currentUser?.id]);
+  }, [milestones, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
 
   useEffect(() => {
-    const id = currentUser?.id || 'guest';
+    if (isSwitchingUser || authLoading) return;
+    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
+    if (!id) return;
     localStorage.setItem(`${USER_DATA_PREFIX}${id}_calendarEvents`, JSON.stringify(calendarEvents));
-  }, [calendarEvents, currentUser?.id]);
+  }, [calendarEvents, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
 
   useEffect(() => {
-    const id = currentUser?.id || 'guest';
+    if (isSwitchingUser || authLoading) return;
+    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
+    if (!id) return;
     localStorage.setItem(`${USER_DATA_PREFIX}${id}_settings`, JSON.stringify(settings));
-  }, [settings, currentUser?.id]);
+  }, [settings, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
 
   useEffect(() => {
-    const id = currentUser?.id || 'guest';
+    if (isSwitchingUser || authLoading) return;
+    const id = isDemo ? 'demo_sandbox' : currentUser?.id;
+    if (!id) return;
     localStorage.setItem(`${USER_DATA_PREFIX}${id}_baseHours`, String(baseLoggedHours));
-  }, [baseLoggedHours, currentUser?.id]);
+  }, [baseLoggedHours, currentUser?.id, isDemo, isSwitchingUser, authLoading]);
 
   // Auth Operations
   const login = async (email: string, pass: string) => {
     const res = await signInUser(email, pass);
     if (res.user) {
       setAllUsers(getSavedAccounts());
-      switchUser(res.user.id);
+      await switchUser(res.user.id);
       return { success: true, needsEmailConfirmation: res.needsEmailConfirmation };
     }
     return { success: false, error: res.error || 'Authentication failed.' };
@@ -462,7 +639,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const res = await signUpUser(email, pass, fullName, targetAir, targetCollege);
     if (res.user) {
       setAllUsers(getSavedAccounts());
-      switchUser(res.user.id);
+      await switchUser(res.user.id);
       return { success: true, needsEmailConfirmation: res.needsEmailConfirmation };
     }
     return { success: false, error: res.error || 'Registration failed.' };
@@ -470,6 +647,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const logout = () => {
     signOutUser();
+    setIsDemo(false);
     setCurrentUser(null);
     setActiveUserId(null);
 
@@ -483,6 +661,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const loginAsDemo = useCallback(() => {
+    setIsSwitchingUser(true);
     const demoUser: AuthUser = {
       id: 'demo_aspirant_gate_da_2028',
       email: 'demo.aspirant@gate-da.example.com',
@@ -491,26 +670,24 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       targetCollege: 'IISc Bangalore (M.Tech AI)',
       createdAt: new Date().toISOString(),
       isConfirmed: true,
+      isDemo: true,
     };
 
-    saveAccountLocally(demoUser);
-    setActiveUserId(demoUser.id);
+    setIsDemo(true);
     setCurrentUser(demoUser);
-    setAllUsers(getSavedAccounts());
 
-    const data = loadInitialData(demoUser);
+    const data = loadInitialData(demoUser, true);
     setSubjects(data.subjects);
     setTasks(data.tasks);
     setMockTests(data.mockTests);
     setMilestones(data.milestones);
     setCalendarEvents(data.calendarEvents);
-    setSettings({
-      ...data.settings,
-      userName: demoUser.fullName,
-      targetAir: 1,
-      targetCollege: 'IISc Bangalore (M.Tech AI)',
-    });
+    setSettings(data.settings);
     setBaseLoggedHours(data.baseLoggedHours);
+
+    setTimeout(() => {
+      setIsSwitchingUser(false);
+    }, 50);
 
     soundManager.playCompletionChime();
   }, []);
@@ -576,7 +753,11 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       prev.map((task) => {
         if (task.id === taskId) {
           const nextState = !task.completed;
-          const updated = { ...task, completed: nextState };
+          const updated: Task = {
+            ...task,
+            completed: nextState,
+            status: nextState ? 'done' : (task.status === 'done' ? 'todo' : task.status || 'todo'),
+          };
           if (currentUser?.id) {
             syncTaskToSupabase(updated, currentUser.id);
           }
@@ -593,9 +774,13 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const addTask = (taskData: Omit<Task, 'id'>) => {
+    const isCompleted = taskData.completed ?? false;
+    const initialStatus = taskData.status || (isCompleted ? 'done' : 'todo');
     const newTask: Task = {
       ...taskData,
       id: `task_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      completed: initialStatus === 'done' ? true : isCompleted,
+      status: initialStatus,
     };
     setTasks((prev) => [newTask, ...prev]);
     if (currentUser?.id) {
@@ -608,7 +793,16 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setTasks((prev) =>
       prev.map((t) => {
         if (t.id === taskId) {
-          const updated = { ...t, ...updates };
+          const isDone = updates.status !== undefined ? updates.status === 'done' : (updates.completed ?? t.completed);
+          const computedStatus = updates.status !== undefined
+            ? updates.status
+            : (updates.completed !== undefined ? (updates.completed ? 'done' : (t.status === 'done' ? 'todo' : t.status || 'todo')) : t.status);
+          const updated: Task = {
+            ...t,
+            ...updates,
+            completed: isDone,
+            status: computedStatus,
+          };
           if (currentUser?.id) {
             syncTaskToSupabase(updated, currentUser.id);
           }
@@ -625,6 +819,113 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (currentUser?.id) {
       deleteTaskFromSupabase(taskId, currentUser.id);
     }
+    soundManager.playSubtleTick();
+  };
+
+  const moveTaskStatus = (taskId: string, newStatus: TaskStatus) => {
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id === taskId) {
+          const isDone = newStatus === 'done';
+          const updated: Task = {
+            ...t,
+            status: newStatus,
+            completed: isDone,
+          };
+          if (currentUser?.id) {
+            syncTaskToSupabase(updated, currentUser.id);
+          }
+          if (isDone && !t.completed) {
+            soundManager.playCompletionChime();
+          } else {
+            soundManager.playSubtleTick();
+          }
+          return updated;
+        }
+        return t;
+      })
+    );
+  };
+
+  const assignTaskToSprint = (taskId: string, sprintId: string | null, sprintWeek?: string) => {
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id === taskId) {
+          const updated: Task = {
+            ...t,
+            sprintId: sprintId || undefined,
+            sprintWeek: sprintWeek || undefined,
+          };
+          if (currentUser?.id) {
+            syncTaskToSupabase(updated, currentUser.id);
+          }
+          return updated;
+        }
+        return t;
+      })
+    );
+    soundManager.playSubtleTick();
+  };
+
+  const bulkAssignTasksToSprint = (taskIds: string[], sprintId: string | null, sprintWeek?: string) => {
+    const idSet = new Set(taskIds);
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (idSet.has(t.id)) {
+          const updated: Task = {
+            ...t,
+            sprintId: sprintId || undefined,
+            sprintWeek: sprintWeek || undefined,
+          };
+          if (currentUser?.id) {
+            syncTaskToSupabase(updated, currentUser.id);
+          }
+          return updated;
+        }
+        return t;
+      })
+    );
+    soundManager.playSubtleTick();
+  };
+
+  const createSprint = (sprintData: Omit<SprintPlan, 'id' | 'createdAt'>) => {
+    const newSprint: SprintPlan = {
+      ...sprintData,
+      id: `sprint_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString(),
+    };
+    setSprints((prev) => [newSprint, ...prev]);
+    setSelectedSprintWeek(newSprint.weekIdentifier);
+    soundManager.playCompletionChime();
+  };
+
+  const updateSprint = (sprintId: string, updates: Partial<SprintPlan>) => {
+    setSprints((prev) =>
+      prev.map((s) => (s.id === sprintId ? { ...s, ...updates } : s))
+    );
+    soundManager.playSubtleTick();
+  };
+
+  const completeSprint = (sprintId: string, retro: SprintRetrospective) => {
+    setSprints((prev) =>
+      prev.map((s) =>
+        s.id === sprintId
+          ? {
+              ...s,
+              status: 'completed',
+              retrospective: retro,
+            }
+          : s
+      )
+    );
+    soundManager.playCompletionChime();
+  };
+
+  const deleteSprint = (sprintId: string) => {
+    setSprints((prev) => prev.filter((s) => s.id !== sprintId));
+    setTasks((prev) =>
+      prev.map((t) => (t.sprintId === sprintId ? { ...t, sprintId: undefined, sprintWeek: undefined } : t))
+    );
     soundManager.playSubtleTick();
   };
 
@@ -751,6 +1052,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       currentUser,
       subjects,
       tasks,
+      sprints,
       mockTests,
       milestones,
       calendarEvents,
@@ -766,35 +1068,120 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const data = JSON.parse(jsonStr);
       if (!data || typeof data !== 'object') return false;
 
-      // Validate subjects array if provided
-      if (data.subjects) {
-        if (!Array.isArray(data.subjects) || data.subjects.length === 0) return false;
-        const validIds = new Set([
-          'prob_stat',
-          'linear_algebra',
-          'calculus_opt',
-          'dsa_python',
-          'dbms_warehouse',
-          'machine_learning',
-          'artificial_intel',
-          'general_aptitude',
-          'mock_pyq',
-        ]);
-        const isValid = data.subjects.some((s: any) => s && validIds.has(s.id) && Array.isArray(s.topics));
-        if (!isValid) return false;
-        setSubjects(data.subjects);
+      const validSubjectIds = new Set<string>([
+        'prob_stat',
+        'linear_algebra',
+        'calculus_opt',
+        'dsa_python',
+        'dbms_warehouse',
+        'machine_learning',
+        'artificial_intel',
+        'general_aptitude',
+        'mock_pyq',
+      ]);
+      const validTopicStatuses = new Set<string>(['completed', 'in_progress', 'revision_due', 'unvisited']);
+      const validTaskTypes = new Set<string>(['concept', 'textbook', 'pyq', 'revision', 'test']);
+      const validPriorities = new Set<string>(['urgent', 'high', 'normal']);
+      const validEventTypes = new Set<string>(['mock', 'revision', 'milestone', 'study_block']);
+
+      // 1. Strict validation for subjects
+      if (data.subjects !== undefined) {
+        if (!Array.isArray(data.subjects) || data.subjects.length === 0 || data.subjects.length > 25) {
+          return false;
+        }
+        for (const s of data.subjects) {
+          if (!s || typeof s !== 'object') return false;
+          if (!validSubjectIds.has(s.id) || typeof s.name !== 'string' || !Array.isArray(s.topics)) {
+            return false;
+          }
+          if (s.topics.length > 100) return false;
+          for (const t of s.topics) {
+            if (!t || typeof t !== 'object') return false;
+            if (typeof t.id !== 'string' || typeof t.title !== 'string') return false;
+            if (!validTopicStatuses.has(t.status)) return false;
+            if (typeof t.confidenceScore !== 'number' || t.confidenceScore < 1 || t.confidenceScore > 5) return false;
+            if (typeof t.pyqsSolved !== 'number' || t.pyqsSolved < 0 || t.pyqsSolved > 10000) return false;
+            if (typeof t.pyqsTotal !== 'number' || t.pyqsTotal < 0 || t.pyqsTotal > 10000) return false;
+            if (typeof t.pyqAccuracy !== 'number' || t.pyqAccuracy < 0 || t.pyqAccuracy > 100) return false;
+          }
+        }
       }
 
-      if (Array.isArray(data.tasks)) setTasks(data.tasks);
-      if (Array.isArray(data.mockTests)) setMockTests(data.mockTests);
-      if (Array.isArray(data.milestones)) setMilestones(data.milestones);
-      if (Array.isArray(data.calendarEvents)) setCalendarEvents(data.calendarEvents);
-      if (data.settings && typeof data.settings === 'object') {
-        setSettings((prev) => ({ ...prev, ...data.settings }));
+      // 2. Strict validation for tasks
+      if (data.tasks !== undefined) {
+        if (!Array.isArray(data.tasks) || data.tasks.length > 1000) return false;
+        for (const task of data.tasks) {
+          if (!task || typeof task !== 'object') return false;
+          if (typeof task.id !== 'string' || task.id.length === 0 || task.id.length > 128) return false;
+          if (typeof task.title !== 'string' || task.title.length === 0 || task.title.length > 300) return false;
+          if (!validSubjectIds.has(task.subjectId)) return false;
+          if (!validTaskTypes.has(task.type)) return false;
+          if (typeof task.durationMinutes !== 'number' || task.durationMinutes < 1 || task.durationMinutes > 1440) return false;
+          if (typeof task.completed !== 'boolean') return false;
+          if (typeof task.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(task.date)) return false;
+          if (!validPriorities.has(task.priority)) return false;
+        }
       }
-      if (typeof data.baseLoggedHours === 'number' && data.baseLoggedHours >= 0) {
-        setBaseLoggedHours(data.baseLoggedHours);
+
+      // 3. Strict validation for mockTests
+      if (data.mockTests !== undefined) {
+        if (!Array.isArray(data.mockTests) || data.mockTests.length > 200) return false;
+        for (const m of data.mockTests) {
+          if (!m || typeof m !== 'object') return false;
+          if (typeof m.id !== 'string' || typeof m.title !== 'string') return false;
+          if (typeof m.score !== 'number' || m.score < 0 || m.score > 100 || isNaN(m.score)) return false;
+          if (typeof m.accuracy !== 'number' || m.accuracy < 0 || m.accuracy > 100) return false;
+          if (typeof m.date !== 'string') return false;
+        }
       }
+
+      // 4. Strict validation for calendarEvents
+      if (data.calendarEvents !== undefined) {
+        if (!Array.isArray(data.calendarEvents) || data.calendarEvents.length > 500) return false;
+        for (const e of data.calendarEvents) {
+          if (!e || typeof e !== 'object') return false;
+          if (typeof e.id !== 'string' || typeof e.title !== 'string') return false;
+          if (typeof e.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(e.date)) return false;
+          if (!validEventTypes.has(e.type)) return false;
+        }
+      }
+
+      // 5. Strict validation for milestones
+      if (data.milestones !== undefined) {
+        if (!Array.isArray(data.milestones) || data.milestones.length > 50) return false;
+        for (const ms of data.milestones) {
+          if (!ms || typeof ms !== 'object') return false;
+          if (typeof ms.id !== 'string' || typeof ms.phaseTitle !== 'string') return false;
+        }
+      }
+
+      // 6. Strict validation for settings
+      if (data.settings !== undefined) {
+        if (!data.settings || typeof data.settings !== 'object') return false;
+        const s = data.settings;
+        if (typeof s.targetAir !== 'number' || s.targetAir < 1 || s.targetAir > 100000) return false;
+        if (typeof s.targetYear !== 'number' || s.targetYear < 2025 || s.targetYear > 2035) return false;
+        if (typeof s.dailyGoalHours !== 'number' || s.dailyGoalHours < 0 || s.dailyGoalHours > 24) return false;
+        if (typeof s.weeklyGoalHours !== 'number' || s.weeklyGoalHours < 0 || s.weeklyGoalHours > 168) return false;
+        if (typeof s.streakCount !== 'number' || s.streakCount < 0) return false;
+      }
+
+      // 7. Strict validation for baseLoggedHours
+      if (data.baseLoggedHours !== undefined) {
+        if (typeof data.baseLoggedHours !== 'number' || data.baseLoggedHours < 0 || data.baseLoggedHours > 50000 || isNaN(data.baseLoggedHours)) {
+          return false;
+        }
+      }
+
+      // ALL VALIDATIONS PASSED: Install state atomically
+      if (data.subjects) setSubjects(data.subjects);
+      if (data.tasks) setTasks(data.tasks);
+      if (data.sprints && Array.isArray(data.sprints)) setSprints(data.sprints);
+      if (data.mockTests) setMockTests(data.mockTests);
+      if (data.milestones) setMilestones(data.milestones);
+      if (data.calendarEvents) setCalendarEvents(data.calendarEvents);
+      if (data.settings) setSettings((prev) => ({ ...prev, ...data.settings }));
+      if (data.baseLoggedHours !== undefined) setBaseLoggedHours(data.baseLoggedHours);
 
       soundManager.playCompletionChime();
       return true;
@@ -929,30 +1316,40 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return unsubscribe;
   }, [tasks, mockTests, totalHoursStudied, settings]);
 
-  // Debounced auto-sync to linked applet when autoSync is enabled
+  // Debounced auto-sync to linked applet when autoSync is enabled (only for authenticated real users)
   useEffect(() => {
-    if (!linkedAppletConfig.autoSync) return;
-    const timeout = setTimeout(() => {
-      const payload = buildSyncPayload(
-        currentUser,
-        subjects,
-        totalHoursStudied,
-        tasks,
-        mockTests,
-        settings
-      );
-      pushSyncToLinkedApplet(payload).catch((err) => {
+    if (!linkedAppletConfig.autoSync || isDemo || !currentUser) return;
+    const abortController = new AbortController();
+    const timeout = setTimeout(async () => {
+      if (abortController.signal.aborted) return;
+      try {
+        const payload = buildSyncPayload(
+          currentUser,
+          subjects,
+          totalHoursStudied,
+          tasks,
+          mockTests,
+          settings
+        );
+        await pushSyncToLinkedApplet(payload);
+      } catch (err) {
         console.warn('Auto-sync notice:', err);
-      });
-    }, 4000);
-    return () => clearTimeout(timeout);
-  }, [subjects, tasks, mockTests, totalHoursStudied, linkedAppletConfig.autoSync, currentUser, settings]);
+      }
+    }, 3500);
+
+    return () => {
+      clearTimeout(timeout);
+      abortController.abort();
+    };
+  }, [subjects, tasks, mockTests, totalHoursStudied, linkedAppletConfig.autoSync, currentUser, isDemo, settings]);
 
   return (
     <StudyContext.Provider
       value={{
         currentUser,
         allUsers,
+        isDemo,
+        authLoading,
         isAuthModalOpen,
         setIsAuthModalOpen,
         login,
@@ -976,6 +1373,9 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsLinkedSyncModalOpen,
         subjects,
         tasks,
+        sprints,
+        selectedSprintWeek,
+        setSelectedSprintWeek,
         mockTests,
         milestones,
         calendarEvents,
@@ -995,6 +1395,13 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         addTask,
         updateTask,
         deleteTask,
+        moveTaskStatus,
+        assignTaskToSprint,
+        bulkAssignTasksToSprint,
+        createSprint,
+        updateSprint,
+        completeSprint,
+        deleteSprint,
         updateTopicStatus,
         updateTopicConfidence,
         addMockTest,

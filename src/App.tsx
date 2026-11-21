@@ -13,6 +13,7 @@ import { PlatformTourModal } from './components/modals/PlatformTourModal';
 import { LandingPageView } from './components/views/LandingPageView';
 import { DashboardView } from './components/views/DashboardView';
 import { DailyView } from './components/views/DailyView';
+import { KanbanView } from './components/views/KanbanView';
 import { WeeklyView } from './components/views/WeeklyView';
 import { SubjectsView } from './components/views/SubjectsView';
 import { RoadmapView } from './components/views/RoadmapView';
@@ -25,6 +26,8 @@ import { SubjectId } from './types';
 const MainAppContent: React.FC = () => {
   const {
     currentUser,
+    isDemo,
+    authLoading,
     activeView,
     setActiveView,
     isAuthModalOpen,
@@ -71,9 +74,20 @@ const MainAppContent: React.FC = () => {
     setActiveView('Subjects');
   };
 
-  // GATE 1: If user is not logged in, show the Home/Landing Page!
-  // No unauthenticated visitor can enter the internal study portal.
-  if (!currentUser) {
+  // GATE 0: While determining session validity, show clean loading state
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#faf8ff] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs font-mono font-medium text-slate-500">Verifying session...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // GATE 1: If user is not logged in and not in sandbox demo, show Public Landing Page
+  if (!currentUser && !isDemo) {
     return (
       <div className="min-h-screen bg-[#faf8ff]">
         <LandingPageView
@@ -97,9 +111,33 @@ const MainAppContent: React.FC = () => {
     );
   }
 
-  // GATE 2: Authenticated User Portal Workspace
+  // GATE 2: Study Portal Workspace (Distinguished between verified account and offline sandbox)
   return (
-    <div className="flex h-screen overflow-hidden bg-[#faf8ff] text-slate-900 font-sans">
+    <div className="flex h-screen overflow-hidden bg-[#faf8ff] text-slate-900 font-sans flex-col">
+      {/* Explicit Sandbox Banner for demo mode */}
+      {isDemo && (
+        <div className="bg-amber-400 text-slate-950 px-4 py-1.5 text-xs font-medium flex items-center justify-between shadow-2xs border-b border-amber-500 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="font-bold uppercase tracking-wider bg-slate-950 text-amber-300 text-[10px] px-1.5 py-0.5 rounded font-mono">
+              Offline Demo Sandbox
+            </span>
+            <span className="text-[11px] text-slate-900">
+              You are exploring in an offline sandbox. Cloud database synchronization, peer telemetry, and remote sync are disabled.
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              setAuthModalTab('register');
+              setIsAuthModalOpen(true);
+            }}
+            className="ml-3 shrink-0 px-2.5 py-0.5 bg-slate-950 text-white rounded text-[11px] font-bold hover:bg-slate-800 transition-colors cursor-pointer"
+          >
+            Create Permanent Account
+          </button>
+        </div>
+      )}
+
+      <div className="flex-1 flex overflow-hidden">
       {/* Pinned Desktop Sidebar & Mobile Slide-Over Drawer */}
       <Sidebar
         onOpenFormulaVault={() => {
@@ -143,6 +181,8 @@ const MainAppContent: React.FC = () => {
             <DailyView onOpenAddTask={() => setIsAddTaskOpen(true)} />
           )}
 
+          {activeView === 'Kanban' && <KanbanView />}
+
           {activeView === 'Weekly' && <WeeklyView />}
 
           {activeView === 'Subjects' && (
@@ -167,6 +207,7 @@ const MainAppContent: React.FC = () => {
             <GuideView onOpenTour={() => setIsTourOpen(true)} />
           )}
         </main>
+      </div>
       </div>
 
       {/* Modals & Dialogs */}

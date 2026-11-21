@@ -126,8 +126,13 @@ export async function syncUserProfileAndProgressToDatabase(
   settings: UserSettings
 ): Promise<{ success: boolean; message: string }> {
   // Prevent sync for demo or guest accounts
-  if (!user?.id || user.id.startsWith('demo_') || user.id.startsWith('guest_') || user.id.includes('aspirant')) {
-    return { success: false, message: 'Demo mode active. Cloud synchronization is disabled.' };
+  if (!user?.id || user.isDemo || user.id.startsWith('demo_') || user.id.startsWith('guest_') || user.id.includes('aspirant')) {
+    return { success: false, message: 'Demo sandbox mode active. Cloud synchronization is disabled.' };
+  }
+
+  // Respect user privacy opt-in setting
+  if (settings.shareProgressWithCohort === false) {
+    return { success: false, message: 'Cohort sharing is disabled in your privacy settings.' };
   }
 
   try {
@@ -207,7 +212,7 @@ export async function syncUserProfileAndProgressToDatabase(
 
 /**
  * Fetches ALL REAL users and their progress directly from the Supabase database.
- * No hardcoding or synthetic users allowed!
+ * No hardcoding or synthetic demo profiles permitted as cohort data.
  */
 export async function getAllPeerProfilesFromDatabase(
   currentUser: AuthUser | null,
@@ -225,104 +230,127 @@ export async function getAllPeerProfilesFromDatabase(
   let dbConnected = false;
   let dbMessage = 'Connected to Supabase';
 
-  // 1. Current user (active user or local state)
-  const activeUser: AuthUser = currentUser || {
-    id: 'demo_aspirant_gate_da_2028',
-    email: 'demo.aspirant@gate-da.example.com',
-    fullName: currentSettings.userName || 'Demo Aspirant',
-    targetAir: currentSettings.targetAir || 1,
-    targetCollege: currentSettings.targetCollege || 'IISc Bangalore (M.Tech AI)',
-    createdAt: new Date().toISOString(),
-  };
+  const isDemo = !currentUser || currentUser.isDemo || currentUser.id.startsWith('demo_');
 
-  const myProfile = computeUserProgressProfile(
-    activeUser,
-    currentSubjects,
-    currentHours,
-    currentMocks,
-    currentSettings,
-    true
-  );
-  profilesMap.set(activeUser.id, myProfile);
+  // 1. Current user profile (only mark isCurrentUser: true)
+  if (currentUser) {
+    const myProfile = computeUserProgressProfile(
+      currentUser,
+      currentSubjects,
+      currentHours,
+      currentMocks,
+      currentSettings,
+      true
+    );
+    profilesMap.set(currentUser.id, myProfile);
+  }
 
-  // 2. Query Supabase database `profiles` and `subject_progress`
+  // 2. Query Supabase database for verified cohort profiles
   try {
-    const [profilesRes, progressRes] = await Promise.all([
-      supabase.from('profiles').select('id, full_name, created_at'),
-      supabase.from('subject_progress').select('student_id, subject_id, updated_at'),
-    ]);
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    // Only query database if user is authenticated
+    if (session?.user && !isDemo) {
+      const [profilesRes, progressRes] = await Promise.all([
+        supabase.from('profiles').select('id, full_name, created_at'),
+        supabase.from('subject_progress').select('student_id, subject_id, updated_at'),
+      ]);
 
-    if (!profilesRes.error) {
-      dbConnected = true;
-      const remoteProfiles = profilesRes.data || [];
+      if (!profilesRes.error) {
+        dbConnected = true;
+        const remoteProfiles = profilesRes.data || [];
+        const remoteProgress = progressRes.data || [];
 
-      // For every remote profile in Supabase database
-      for (const remote of remoteProfiles) {
-        if (!remote.id || remote.id === activeUser.id) continue;
+        // Build set of students with real progress
+        const studentsWithProgress = new Set(remoteProgress.map((p) => p.student_id));
 
-        // Find their stored user progress if registered locally, or construct clean baseline from DB
-        const savedSubjectsRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_subjects`);
-        const savedHoursRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_baseHours`);
-        const savedMocksRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_mockTests`);
-        const savedSettingsRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_settings`);
+        for (const remote of remoteProfiles) {
+          if (!remote.id || remote.id === currentUser?.id) continue;
 
-        // Do NOT fabricate demo defaults (INITIAL_SUBJECTS with 412h) - use clean zero subjects if no local progress
-        const pSubjects: Subject[] = savedSubjectsRaw ? JSON.parse(savedSubjectsRaw) : createFreshZeroSubjects();
-        const pHours: number = savedHoursRaw ? Number(savedHoursRaw) : 0;
-        const pMocks: MockTest[] = savedMocksRaw ? JSON.parse(savedMocksRaw) : [];
-        const pSettings: UserSettings = savedSettingsRaw
-          ? JSON.parse(savedSettingsRaw)
-          : {
-              targetAir: 10,
-              targetCollege: 'IISc Bangalore',
-              targetYear: 2028,
-              examDate: '2028-02-12',
-              dailyGoalHours: 4,
-              weeklyGoalHours: 25,
-              streakCount: 1,
-              userName: remote.full_name || 'GATE Aspirant',
-            };
+          // Only show peer if they have genuine progress records in Supabase database
+          if (!studentsWithProgress.has(remote.id)) continue;
 
-        const remoteUser: AuthUser = {
-          id: remote.id,
-          email: '', // Never expose peer email
-          fullName: remote.full_name || 'GATE Aspirant',
-          targetAir: pSettings.targetAir,
-          targetCollege: pSettings.targetCollege,
-          createdAt: remote.created_at || new Date().toISOString(),
-        };
+          // Load their isolated user progress
+          const savedSubjectsRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_subjects`);
+          const savedHoursRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_baseHours`);
+          const savedMocksRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_mockTests`);
+          const savedSettingsRaw = localStorage.getItem(`${USER_DATA_PREFIX}${remote.id}_settings`);
 
-        const prof = computeUserProgressProfile(
-          remoteUser,
-          pSubjects,
-          pHours,
-          pMocks,
-          pSettings,
-          false
-        );
-        profilesMap.set(remote.id, prof);
+          // Strictly use real progress or zero baseline — never substitute demo data
+          const pSubjects: Subject[] = savedSubjectsRaw ? JSON.parse(savedSubjectsRaw) : createFreshZeroSubjects();
+          const pHours: number = savedHoursRaw ? Number(savedHoursRaw) : 0;
+          const pMocks: MockTest[] = savedMocksRaw ? JSON.parse(savedMocksRaw) : [];
+          const pSettings: UserSettings = savedSettingsRaw
+            ? JSON.parse(savedSettingsRaw)
+            : {
+                targetAir: 10,
+                targetCollege: 'IISc Bangalore',
+                targetYear: 2028,
+                examDate: '2028-02-12',
+                dailyGoalHours: 4,
+                weeklyGoalHours: 25,
+                streakCount: 1,
+                userName: remote.full_name || 'GATE Aspirant',
+                shareProgressWithCohort: true,
+              };
+
+          // Respect peer's opt-in setting
+          if (pSettings.shareProgressWithCohort === false) {
+            continue;
+          }
+
+          const remoteUser: AuthUser = {
+            id: remote.id,
+            email: '', // Never expose peer email
+            fullName: remote.full_name || 'GATE Aspirant',
+            targetAir: pSettings.targetAir,
+            targetCollege: pSettings.targetCollege,
+            createdAt: remote.created_at || new Date().toISOString(),
+          };
+
+          const prof = computeUserProgressProfile(
+            remoteUser,
+            pSubjects,
+            pHours,
+            pMocks,
+            pSettings,
+            false
+          );
+          profilesMap.set(remote.id, prof);
+        }
+      } else {
+        dbMessage = `Database notice: ${profilesRes.error.message}`;
       }
     } else {
-      dbMessage = `Database notice: ${profilesRes.error.message}`;
+      dbMessage = isDemo
+        ? 'Demo mode active. Live cohort leaderboard requires an authenticated account.'
+        : 'Sign in to connect to the verified cohort database.';
     }
   } catch (err: any) {
     console.warn('Supabase peer profiles fetch notice:', err);
     dbMessage = 'Offline / Local database mode';
   }
 
-  // 3. Include any additional real accounts registered locally in the app
+  // 3. Include any other verified registered accounts on this system that have opted in
   try {
     const localAccounts = getSavedAccounts();
     for (const acc of localAccounts) {
-      if (acc.id === activeUser.id || (acc.email && activeUser.email && acc.email.toLowerCase() === activeUser.email.toLowerCase())) {
+      if (acc.id === currentUser?.id || acc.id.startsWith('demo_') || acc.isDemo) {
         continue;
       }
       if (profilesMap.has(acc.id)) continue;
 
+      const savedSettingsRaw = localStorage.getItem(`${USER_DATA_PREFIX}${acc.id}_settings`);
+      if (savedSettingsRaw) {
+        const parsedSettings = JSON.parse(savedSettingsRaw);
+        if (parsedSettings.shareProgressWithCohort === false) {
+          continue;
+        }
+      }
+
       const savedSubjectsRaw = localStorage.getItem(`${USER_DATA_PREFIX}${acc.id}_subjects`);
       const savedHoursRaw = localStorage.getItem(`${USER_DATA_PREFIX}${acc.id}_baseHours`);
       const savedMocksRaw = localStorage.getItem(`${USER_DATA_PREFIX}${acc.id}_mockTests`);
-      const savedSettingsRaw = localStorage.getItem(`${USER_DATA_PREFIX}${acc.id}_settings`);
 
       const pSubjects: Subject[] = savedSubjectsRaw ? JSON.parse(savedSubjectsRaw) : createFreshZeroSubjects();
       const pHours: number = savedHoursRaw ? Number(savedHoursRaw) : 0;
@@ -338,6 +366,7 @@ export async function getAllPeerProfilesFromDatabase(
             weeklyGoalHours: 25,
             streakCount: 1,
             userName: acc.fullName,
+            shareProgressWithCohort: true,
           };
 
       const peerUser: AuthUser = {
