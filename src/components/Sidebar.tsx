@@ -15,6 +15,7 @@ import {
   BookMarked,
   Award,
   Users,
+  MessageCircle,
   Compass,
   HelpCircle,
   X,
@@ -130,6 +131,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Users,
       badge: 'Compare',
       badgeColor: 'text-indigo-700 bg-indigo-50 font-mono',
+    },
+    {
+      id: 'Chat',
+      label: 'Study Chat',
+      icon: MessageCircle,
+      badge: null,
     },
     {
       id: 'Guide',

@@ -138,7 +138,17 @@ This is a tracker and analysis workspace; it does not claim to conduct an offici
 
 The peer comparison screen is designed to display progress metrics from supported Supabase records while masking peer email addresses in the UI. Availability and accuracy depend on database configuration, data-sharing policy and the records present.
 
-### 9. Account, cloud sync and data backup
+### 9. Pseudonymous study chat
+
+- Every registered account receives a random chat ID; users start conversations by entering an exact ID.
+- A shared **GATE Study Group** is created automatically. New accounts join at registration, existing accounts are added on setup/login, and signed-in users can post in the group.
+- Chat IDs are stored separately from readable profiles. Chat RPCs return pseudonymous IDs and message ownership, not account emails or auth user IDs.
+- Authors can edit or permanently delete their own messages for one hour; edited text is checked by the same server-side filter.
+- Deletion removes the message from live chat; Supabase backup copies remain subject to the project’s configured retention.
+- Row-level security, server-side message submission, length limits, a per-user rate limit, basic English/Hinglish/Hindi abuse and threat keywords, illegal-activity and contact-detail filters, plus block and report controls.
+- Messages are screened and stored by the Supabase project. This is **not end-to-end encryption**; the service can read message text for moderation. The filters are basic and cannot guarantee that every message is educational or catch every violation. Do not share sensitive information.
+
+### 10. Account, cloud sync and data backup
 
 - Supabase-based sign-in, registration and password-reset flow.
 - Guest/demo access for product exploration.
@@ -159,7 +169,7 @@ GATE-2028/
 │   │   ├── common/          # Shared UI and error boundary
 │   │   ├── modals/          # Auth, formula vault, backup, tasks, search, settings
 │   │   ├── peer/            # Peer comparison charts and detail views
-│   │   ├── views/           # Dashboard, daily, weekly, subjects, roadmap, analytics
+│   │   ├── views/           # Dashboard, chat, daily, weekly, subjects, roadmap, analytics
 │   │   ├── widgets/         # Revision and study widgets
 │   │   ├── Sidebar.tsx
 │   │   └── TopBar.tsx
@@ -171,6 +181,7 @@ GATE-2028/
 │   ├── lib/
 │   │   ├── supabase.ts
 │   │   ├── supabaseService.ts
+│   │   ├── chatService.ts
 │   │   └── peerProgressService.ts
 │   ├── types/
 │   ├── utils/
@@ -253,7 +264,17 @@ Configure the values for your own services:
 
 Do not commit real secrets or private service-role keys. Keep production credentials in Vercel/hosting environment settings.
 
-### 4. Start the development server
+### 4. Set up the Supabase database
+
+For a fresh Supabase project, open **SQL Editor**, paste the contents of [`supabase/setup.sql`](./supabase/setup.sql), and run it. If the project was already set up, run the latest version of the same script to add the chat schema and policies. It creates empty syllabus tables and private chat tables; it does not insert subjects, topics, subtopics, sample users or study records. The script can be rerun. Sign in, then create your own subjects, topics and subtopics in the **Subjects** view. New accounts receive a private chat ID automatically.
+
+If registration fails with **“Database error saving new user”** and `public.profiles` is missing, run [`supabase/fix_auth_signup.sql`](./supabase/fix_auth_signup.sql) in that same Supabase project. Confirm the project URL matches `VITE_SUPABASE_URL` in the app environment.
+
+The chat feature requires the latest `setup.sql` to have run in the same Supabase project used by the app. It uses TLS in transit and the Supabase project’s managed at-rest protection, but it does not provide end-to-end encryption. The server-side checks are keyword-based safeguards rather than semantic moderation; messages can be incorrectly allowed or blocked.
+
+If chat reports `PGRST202` or says `chat_get_my_chat_id` is missing, verify `VITE_SUPABASE_URL` points to the project where the script ran. After the script completes, run `NOTIFY pgrst, 'reload schema';` in that project’s SQL Editor, wait briefly, and refresh the app.
+
+### 5. Start the development server
 
 ```bash
 npm run dev
@@ -261,7 +282,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-### 5. Run validation and production build
+### 6. Run validation and production build
 
 ```bash
 npm run lint

@@ -32,6 +32,7 @@ import {
 } from '../data/gateDaSyllabus';
 import { soundManager } from '../utils/audio';
 import { supabase } from '../lib/supabase';
+import { ensureChatGroupMembership as joinStudyGroup } from '../lib/chatService';
 import {
   signUpUser,
   signInUser,
@@ -87,6 +88,8 @@ interface StudyContextType {
   authLoading: boolean;
   isAuthModalOpen: boolean;
   setIsAuthModalOpen: (open: boolean) => void;
+  chatGroupJoinError: string | null;
+  ensureChatGroupMembership: () => Promise<void>;
   login: (email: string, pass: string) => Promise<{ success: boolean; error?: string; needsEmailConfirmation?: boolean }>;
   register: (
     email: string,
@@ -258,6 +261,23 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const switchAbortRef = React.useRef<AbortController | null>(null);
 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [chatGroupJoinError, setChatGroupJoinError] = useState<string | null>(null);
+
+  const ensureChatGroupMembership = useCallback(async () => {
+    if (!currentUser || isDemo || currentUser.id.startsWith('demo_')) {
+      const error = new Error('Sign in with a permanent account to join the study group.');
+      setChatGroupJoinError(error.message);
+      throw error;
+    }
+
+    try {
+      await joinStudyGroup();
+      setChatGroupJoinError(null);
+    } catch (error) {
+      setChatGroupJoinError(error instanceof Error ? error.message : 'Could not join the study group.');
+      throw error;
+    }
+  }, [currentUser, isDemo]);
 
   // Helper to get user-specific storage key
   const getUserKey = (key: string, userId?: string) => {
@@ -578,6 +598,22 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!currentUser || isDemo || currentUser.id.startsWith('demo_')) {
+      setChatGroupJoinError(null);
+      return;
+    }
+
+    let active = true;
+    void ensureChatGroupMembership().catch((error: unknown) => {
+      if (active) console.warn('Automatic study group join failed:', error);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [currentUser, isDemo, ensureChatGroupMembership]);
 
   useEffect(() => {
     if (!currentUser || isDemo) {
@@ -1948,6 +1984,8 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         authLoading,
         isAuthModalOpen,
         setIsAuthModalOpen,
+        chatGroupJoinError,
+        ensureChatGroupMembership,
         login,
         register,
         logout,

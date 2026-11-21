@@ -22,6 +22,7 @@ import { CalendarView } from './components/views/CalendarView';
 import { PeerCompareView } from './components/views/PeerCompareView';
 import { GuideView } from './components/views/GuideView';
 import { ContentStudioView } from './components/views/ContentStudioView';
+import { ChatView } from './components/views/ChatView';
 import { SubjectId } from './types';
 
 const MainAppContent: React.FC = () => {
@@ -205,6 +206,8 @@ const MainAppContent: React.FC = () => {
           {activeView === 'Calendar' && <CalendarView />}
 
           {activeView === 'PeerCompare' && <PeerCompareView />}
+
+          {activeView === 'Chat' && <ChatView />}
 
           {activeView === 'Guide' && (
             <GuideView onOpenTour={() => setIsTourOpen(true)} />
