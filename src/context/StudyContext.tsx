@@ -259,6 +259,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Request generation token and abort controller to prevent race conditions during rapid switching
   const switchGenerationRef = React.useRef<number>(0);
   const switchAbortRef = React.useRef<AbortController | null>(null);
+  const isRegisteringRef = React.useRef(false);
 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [chatGroupJoinError, setChatGroupJoinError] = useState<string | null>(null);
@@ -557,6 +558,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Handle all Supabase auth lifecycle events
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!isMounted) return;
+      if (isRegisteringRef.current && event !== 'SIGNED_OUT') return;
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION') {
         if (session?.user) {
           const sbUser = session.user;
@@ -792,13 +794,17 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     targetAir: number = 1,
     targetCollege: string = 'IISc Bangalore (M.Tech AI)'
   ) => {
-    const res = await signUpUser(email, pass, fullName, targetAir, targetCollege);
-    if (res.user) {
-      setAllUsers(getSavedAccounts());
-      await switchUser(res.user.id);
-      return { success: true, needsEmailConfirmation: res.needsEmailConfirmation };
+    isRegisteringRef.current = true;
+    try {
+      const res = await signUpUser(email, pass, fullName, targetAir, targetCollege);
+      if (res.user) {
+        setAllUsers(getSavedAccounts());
+        return { success: true, needsEmailConfirmation: res.needsEmailConfirmation };
+      }
+      return { success: false, error: res.error || 'Registration failed.' };
+    } finally {
+      isRegisteringRef.current = false;
     }
-    return { success: false, error: res.error || 'Registration failed.' };
   };
 
   const logout = () => {

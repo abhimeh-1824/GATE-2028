@@ -107,6 +107,7 @@ const MainAppContent: React.FC = () => {
         <AuthModal
           isOpen={isAuthModalOpen}
           onClose={() => setIsAuthModalOpen(false)}
+          onRegistrationSuccess={() => setAuthModalTab('login')}
           defaultTab={authModalTab}
         />
       </div>
@@ -251,6 +252,7 @@ const MainAppContent: React.FC = () => {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
+        onRegistrationSuccess={() => setAuthModalTab('login')}
         defaultTab={authModalTab}
       />
 

@@ -126,7 +126,16 @@ export async function signUpUser(
 
     // Save locally to user list
     saveAccountLocally(newUser);
-    setActiveUserId(newUser.id);
+
+    if (data.session) {
+      const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' });
+      if (signOutError) {
+        return {
+          user: null,
+          error: 'Account created, but the new session could not be cleared. Please sign out before logging in.',
+        };
+      }
+    }
 
     return {
       user: newUser,

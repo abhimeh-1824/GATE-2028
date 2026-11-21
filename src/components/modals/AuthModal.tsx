@@ -20,12 +20,14 @@ import { getAppUrl } from '../../lib/appUrl';
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onRegistrationSuccess: () => void;
   defaultTab?: 'login' | 'register';
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
   onClose,
+  onRegistrationSuccess,
   defaultTab = 'login',
 }) => {
   const { login, register, loginAsDemo } = useStudy();
@@ -35,10 +37,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setActiveTab(defaultTab);
+    }
+  }, [defaultTab, isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
       setErrorMessage(null);
       setSuccessNotice(null);
     }
-  }, [defaultTab, isOpen]);
+  }, [isOpen]);
 
   // Close on Escape key
   useEffect(() => {
@@ -125,17 +132,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoading(false);
 
     if (res.success) {
+      onRegistrationSuccess();
+      setActiveTab('login');
+      setPassword('');
       if (res.needsEmailConfirmation) {
         setSuccessNotice(
-          'Account created! Confirmation email sent. You can start studying immediately; verify your email at your convenience.'
+          'Account created! Confirm your email from the link we sent, then sign in here.'
         );
       } else {
-        setSuccessNotice('Account created successfully! Initializing workspace with clean zero metrics.');
+        setSuccessNotice('Account created successfully! Please sign in with your email and password.');
       }
-      setTimeout(() => {
-        onClose();
-        setSuccessNotice(null);
-      }, 1200);
     } else {
       setErrorMessage(sanitizeError(res.error || 'Registration failed.'));
     }
