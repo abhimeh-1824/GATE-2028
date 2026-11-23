@@ -52,6 +52,7 @@ import {
   fetchSyllabusFromDatabase,
   saveSyllabusToDatabase,
   fetchUserRole,
+  fetchUserBlockStatus,
   updateSubjectInDb,
   deleteSubjectInDb,
   updateTopicInDb,
@@ -106,6 +107,8 @@ interface StudyContextType {
   authLoading: boolean;
   isAuthModalOpen: boolean;
   setIsAuthModalOpen: (open: boolean) => void;
+  blockedAccountNotice: string | null;
+  dismissBlockedAccountNotice: () => void;
   chatGroupJoinError: string | null;
   ensureChatGroupMembership: () => Promise<void>;
   login: (email: string, pass: string) => Promise<{ success: boolean; error?: string; needsEmailConfirmation?: boolean }>;
@@ -757,6 +760,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Auth Operations
   const login = async (email: string, pass: string) => {
+    setBlockedAccountNotice(null);
     const res = await signInUser(email, pass);
     if (res.user) {
       setAllUsers(getSavedAccounts());
@@ -1432,6 +1436,10 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Role-Based Access & Hierarchical Notes / Tests State
   // ============================================================================
   const [userRole, setUserRole] = useState<UserRole>('student');
+  const [blockedAccountNotice, setBlockedAccountNotice] = useState<string | null>(null);
+  const dismissBlockedAccountNotice = useCallback(() => {
+    setBlockedAccountNotice(null);
+  }, []);
   const [studyNotes, setStudyNotes] = useState<StudyNote[]>([]);
   const [levelTests, setLevelTests] = useState<LevelTest[]>([]);
   const [testAttempts, setTestAttempts] = useState<TestAttempt[]>([]);
@@ -1497,6 +1505,24 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (isDemo || currentUser.isDemo) {
         if (active) setUserRole(currentUser.role || 'admin');
       } else {
+        // Immediately verify the user has not been blocked by an administrator
+        const blockStatus = await fetchUserBlockStatus(currentUser.id);
+        if (!active) return;
+        if (blockStatus.isBlocked) {
+          await signOutUser();
+          if (!active) return;
+          setActiveUserId(null);
+          setCurrentUser(null);
+          setIsDemo(false);
+          setUserRole('student');
+          setBlockedAccountNotice(
+            blockStatus.reason
+              ? `Your account has been blocked by an administrator: ${blockStatus.reason}`
+              : 'Your account has been blocked by an administrator and cannot access this portal.'
+          );
+          return;
+        }
+
         const fetchedRole = await fetchUserRole(currentUser.id);
         if (active) setUserRole(fetchedRole);
       }
@@ -1629,7 +1655,16 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const res = await updateLevelTest(testId, patch, isDemo);
     if (res.data) {
       setLevelTests((prev) =>
-        prev.map((t) => (t.id === testId ? { ...t, ...res.data!, questionCount: t.questionCount } : t))
+        prev.map((t) =>
+          t.id === testId
+            ? {
+                ...t,
+                ...res.data!,
+                questionCount: t.questionCount,
+                attemptCount: t.attemptCount,
+              }
+            : t
+        )
       );
       soundManager.playSubtleTick();
       return { success: true, test: res.data };
@@ -1638,7 +1673,28 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const removeLevelTest: StudyContextType['removeLevelTest'] = async (testId) => {
-    const res = await deleteLevelTest(testId, isDemo);
+    if (!isAdmin) {
+      return {
+        success: false,
+        error: 'Only administrators can delete tests.',
+      };
+    }
+
+    const targetTest = levelTests.find((t) => t.id === testId);
+    const localAttemptCount = testAttempts.filter((a) => a.testId === testId).length;
+    const knownAttemptCount = Math.max(targetTest?.attemptCount ?? 0, localAttemptCount);
+
+    if (knownAttemptCount > 0) {
+      return {
+        success: false,
+        error: 'This test cannot be deleted because one or more users have already attempted it.',
+      };
+    }
+
+    const res = await deleteLevelTest(testId, isDemo, {
+      isAdmin,
+      knownAttemptCount,
+    });
     if (res.data) {
       setLevelTests((prev) => prev.filter((t) => t.id !== testId));
       setTestAttempts((prev) => prev.filter((a) => a.testId !== testId));
@@ -1664,6 +1720,13 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (res.data) {
       const savedAttempt = res.data;
       setTestAttempts((prev) => [savedAttempt, ...prev]);
+      setLevelTests((prev) =>
+        prev.map((t) =>
+          t.id === input.testId
+            ? { ...t, attemptCount: (t.attemptCount ?? 0) + 1 }
+            : t
+        )
+      );
 
       let coinsAwarded: CoinAwardBreakdown | undefined;
       if (currentUser?.id) {
@@ -2073,7 +2136,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           settingsToPush
         );
 
-        const pushRes = await pushSyncToLinkedApplet(payload);
+        const pushRes = await pushSyncToLinkedApplet(payload, { includeServerApi: true });
         const freshConfig = getLinkedAppletConfig();
         setLinkedAppletConfig(freshConfig);
         const msg = mergedResult
@@ -2131,7 +2194,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           mockTests,
           settings
         );
-        await pushSyncToLinkedApplet(payload);
+        await pushSyncToLinkedApplet(payload, { includeServerApi: false });
       } catch (err) {
         console.warn('Auto-sync notice:', err);
       }
@@ -2152,6 +2215,8 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         authLoading,
         isAuthModalOpen,
         setIsAuthModalOpen,
+        blockedAccountNotice,
+        dismissBlockedAccountNotice,
         chatGroupJoinError,
         ensureChatGroupMembership,
         login,

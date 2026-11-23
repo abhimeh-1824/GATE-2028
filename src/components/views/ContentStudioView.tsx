@@ -22,6 +22,8 @@ import {
   Save,
   X,
   Lock,
+  Ban,
+  UserCheck,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
 import {
@@ -48,6 +50,7 @@ import {
 import {
   fetchAllManagedProfiles,
   updateManagedUserRole,
+  setManagedUserBlocked,
 } from '../../lib/supabaseService';
 import { TestRunnerModal } from '../modals/TestRunnerModal';
 import { getDeterministicUuid } from '../../lib/supabaseService';
@@ -76,6 +79,7 @@ export const ContentStudioView: React.FC = () => {
     canManageContent,
     studyNotes,
     levelTests,
+    testAttempts,
     notesTestsNotice,
     refreshNotesAndTests,
     addSubject,
@@ -793,6 +797,9 @@ export const ContentStudioView: React.FC = () => {
   const [profiles, setProfiles] = useState<ManagedUserProfile[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [profilesError, setProfilesError] = useState<string | null>(null);
+  const [pendingBlockUserId, setPendingBlockUserId] = useState<string | null>(null);
+  const [blockReasonDraft, setBlockReasonDraft] = useState<string>('');
+  const [updatingBlockUserId, setUpdatingBlockUserId] = useState<string | null>(null);
 
   const loadProfiles = async () => {
     if (!isAdmin || isDemo) return;
@@ -817,6 +824,41 @@ export const ContentStudioView: React.FC = () => {
       showFeedback('success', `Updated user role to ${role.replace('_', ' ')}.`);
     } else {
       showFeedback('error', res.error || 'Failed to update user role.');
+    }
+  };
+
+  const handleSetUserBlocked = async (
+    target: ManagedUserProfile,
+    blocked: boolean,
+    reason?: string
+  ) => {
+    setUpdatingBlockUserId(target.id);
+    const res = await setManagedUserBlocked(target.id, blocked, reason);
+    setUpdatingBlockUserId(null);
+
+    if (res.success) {
+      setProfiles((prev) =>
+        prev.map((p) =>
+          p.id === target.id
+            ? {
+                ...p,
+                isBlocked: blocked,
+                blockedAt: blocked ? new Date().toISOString() : null,
+                blockedReason: blocked ? (reason?.trim() || null) : null,
+              }
+            : p
+        )
+      );
+      setPendingBlockUserId(null);
+      setBlockReasonDraft('');
+      showFeedback(
+        'success',
+        blocked
+          ? `${target.fullName} has been blocked and can no longer sign in.`
+          : `${target.fullName} has been unblocked.`
+      );
+    } else {
+      showFeedback('error', res.error || 'Failed to update user block status.');
     }
   };
 
@@ -1890,6 +1932,12 @@ export const ContentStudioView: React.FC = () => {
                       const isSelected = activeManagedTestId === t.id;
                       const editable = canModifyTest(t);
                       const delKey = `test_${t.id}`;
+                      const totalAttempts = Math.max(
+                        t.attemptCount ?? 0,
+                        testAttempts.filter((a) => a.testId === t.id).length
+                      );
+                      const canAdminDelete = isAdmin && totalAttempts === 0;
+
                       return (
                         <div
                           key={t.id}
@@ -1914,6 +1962,15 @@ export const ContentStudioView: React.FC = () => {
                                 >
                                   {t.isActive ? 'ACTIVE' : 'INACTIVE'}
                                 </span>
+                                {totalAttempts > 0 && (
+                                  <span
+                                    title="Locked from deletion because users have already attempted this test"
+                                    className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-200"
+                                  >
+                                    <Lock className="w-2.5 h-2.5" />
+                                    {totalAttempts} {totalAttempts === 1 ? 'attempt' : 'attempts'}
+                                  </span>
+                                )}
                               </div>
                               <p className="text-[11px] font-mono text-slate-500 mt-1">
                                 {t.entityType.toUpperCase()} • {t.questionCount ?? 0} Qs •{' '}
@@ -1952,26 +2009,45 @@ export const ContentStudioView: React.FC = () => {
                                   >
                                     <Pencil className="w-3.5 h-3.5" />
                                   </button>
-                                  {confirmDeleteKey === delKey ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteTest(t.id)}
-                                      className="px-2 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold"
-                                    >
-                                      Confirm
-                                    </button>
+                                </>
+                              )}
+                              {isAdmin &&
+                                (canAdminDelete ? (
+                                  confirmDeleteKey === delKey ? (
+                                    <div className="flex items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteTest(t.id)}
+                                        className="px-2 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold hover:bg-rose-700"
+                                      >
+                                        Confirm
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setConfirmDeleteKey(null)}
+                                        className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-semibold hover:bg-slate-200"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
                                   ) : (
                                     <button
                                       type="button"
-                                      title="Delete Test"
+                                      title="Delete Unattempted Test (Admin Only)"
                                       onClick={() => setConfirmDeleteKey(delKey)}
                                       className="p-1.5 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"
                                     >
                                       <Trash2 className="w-3.5 h-3.5" />
                                     </button>
-                                  )}
-                                </>
-                              )}
+                                  )
+                                ) : (
+                                  <span
+                                    title={`Delete locked: ${totalAttempts} user attempt(s) recorded`}
+                                    className="p-1.5 rounded text-slate-300 cursor-not-allowed"
+                                  >
+                                    <Lock className="w-3.5 h-3.5" />
+                                  </span>
+                                ))}
                             </div>
                           </div>
                         </div>
@@ -2312,17 +2388,16 @@ export const ContentStudioView: React.FC = () => {
       )}
 
       {/* ===================================================================== */}
-      {/* TAB 4: ADMIN ROLE DELEGATION                                          */}
+      {/* TAB 4: ADMIN ROLE DELEGATION & USER MODERATION                        */}
       {/* ===================================================================== */}
       {activeTab === 'roles' && isAdmin && (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+          <div className="px-5 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-sm font-bold text-slate-900">User Role Delegation</h2>
+              <h2 className="text-sm font-bold text-slate-900">User Roles &amp; Access Moderation</h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Assign <strong>Content Manager</strong> to delegate Subject, Topic, Subtopic &amp;
-                HTML Notes authoring without granting full Admin privileges. All users can create
-                Tests.
+                Assign roles or block any non-admin user. Blocked users are signed out and prevented
+                from logging in until unblocked.
               </p>
             </div>
             {!isDemo && (
@@ -2338,7 +2413,7 @@ export const ContentStudioView: React.FC = () => {
 
           {isDemo ? (
             <div className="p-8 text-center text-xs text-slate-500">
-              Sign in with a live Supabase Admin account to manage registered user roles.
+              Sign in with a live Supabase Admin account to manage user roles and block access.
             </div>
           ) : loadingProfiles ? (
             <div className="p-8 text-center text-xs text-slate-400">Loading user profiles...</div>
@@ -2350,41 +2425,138 @@ export const ContentStudioView: React.FC = () => {
                 <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
                   <tr>
                     <th className="text-left px-5 py-2.5 font-semibold">User</th>
-                    <th className="text-left px-5 py-2.5 font-semibold">User ID</th>
-                    <th className="text-left px-5 py-2.5 font-semibold">Joined</th>
-                    <th className="text-right px-5 py-2.5 font-semibold">Assigned Role</th>
+                    <th className="text-left px-4 py-2.5 font-semibold">Status</th>
+                    <th className="text-left px-4 py-2.5 font-semibold">Joined</th>
+                    <th className="text-left px-4 py-2.5 font-semibold">Assigned Role</th>
+                    <th className="text-right px-5 py-2.5 font-semibold">Account Access</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {profiles.map((p) => (
-                    <tr key={p.id} className="hover:bg-slate-50">
-                      <td className="px-5 py-3 font-semibold text-slate-900">
-                        {p.fullName}
-                        {p.id === currentUser?.id && (
-                          <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">
-                            YOU
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-5 py-3 font-mono text-[11px] text-slate-500">
-                        {p.id.slice(0, 12)}...
-                      </td>
-                      <td className="px-5 py-3 text-slate-600">
-                        {new Date(p.createdAt).toLocaleDateString()}
-                      </td>
-                      <td className="px-5 py-3 text-right">
-                        <select
-                          value={p.role}
-                          onChange={(e) => handleChangeUserRole(p.id, e.target.value as UserRole)}
-                          className="px-2.5 py-1.5 text-xs font-semibold border border-slate-200 rounded-lg bg-white"
-                        >
-                          <option value="student">Student (Tests Only)</option>
-                          <option value="content_manager">Content Manager (Subjects + Notes)</option>
-                          <option value="admin">Admin (Full Control)</option>
-                        </select>
-                      </td>
-                    </tr>
-                  ))}
+                  {profiles.map((p) => {
+                    const isSelf = p.id === currentUser?.id;
+                    const isProtectedAdmin = isSelf || p.role === 'admin';
+                    const isPendingBlock = pendingBlockUserId === p.id;
+                    const isUpdatingBlock = updatingBlockUserId === p.id;
+
+                    return (
+                      <tr
+                        key={p.id}
+                        className={p.isBlocked ? 'bg-rose-50/40 hover:bg-rose-50/60' : 'hover:bg-slate-50'}
+                      >
+                        <td className="px-5 py-3">
+                          <div className="font-semibold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                            <span>{p.fullName}</span>
+                            {isSelf && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">
+                                YOU
+                              </span>
+                            )}
+                          </div>
+                          <div className="font-mono text-[10px] text-slate-400 mt-0.5">
+                            {p.id.slice(0, 12)}...
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          {p.isBlocked ? (
+                            <div>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200">
+                                <Ban className="w-2.5 h-2.5" />
+                                Blocked
+                              </span>
+                              {p.blockedReason && (
+                                <p className="text-[10px] text-rose-700 mt-1 max-w-[180px] truncate" title={p.blockedReason}>
+                                  {p.blockedReason}
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              Active
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {new Date(p.createdAt).toLocaleDateString()}
+                        </td>
+                        <td className="px-4 py-3">
+                          <select
+                            value={p.role}
+                            disabled={isSelf}
+                            onChange={(e) => handleChangeUserRole(p.id, e.target.value as UserRole)}
+                            className="px-2.5 py-1.5 text-xs font-semibold border border-slate-200 rounded-lg bg-white disabled:opacity-60"
+                          >
+                            <option value="student">Student (Tests Only)</option>
+                            <option value="content_manager">Content Manager (Subjects + Notes)</option>
+                            <option value="admin">Admin (Full Control)</option>
+                          </select>
+                        </td>
+                        <td className="px-5 py-3 text-right">
+                          {isProtectedAdmin ? (
+                            <span className="text-[11px] text-slate-400 font-medium">
+                              {isSelf ? 'Your account' : 'Admin protected'}
+                            </span>
+                          ) : p.isBlocked ? (
+                            <button
+                              type="button"
+                              disabled={isUpdatingBlock}
+                              onClick={() => void handleSetUserBlocked(p, false)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 text-xs font-semibold disabled:opacity-50"
+                            >
+                              {isUpdatingBlock ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <UserCheck className="w-3.5 h-3.5" />
+                              )}
+                              Unblock User
+                            </button>
+                          ) : isPendingBlock ? (
+                            <div className="flex flex-col items-end gap-1.5">
+                              <input
+                                type="text"
+                                value={blockReasonDraft}
+                                onChange={(e) => setBlockReasonDraft(e.target.value)}
+                                placeholder="Reason (optional)"
+                                maxLength={160}
+                                className="w-48 px-2.5 py-1 text-[11px] border border-rose-200 rounded-lg bg-white outline-none focus:border-rose-400"
+                              />
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={isUpdatingBlock}
+                                  onClick={() => void handleSetUserBlocked(p, true, blockReasonDraft)}
+                                  className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold disabled:opacity-50"
+                                >
+                                  {isUpdatingBlock ? 'Blocking...' : 'Confirm Block'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPendingBlockUserId(null);
+                                    setBlockReasonDraft('');
+                                  }}
+                                  className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-semibold"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPendingBlockUserId(p.id);
+                                setBlockReasonDraft('');
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-200 bg-white text-rose-700 hover:bg-rose-50 text-xs font-semibold"
+                            >
+                              <Ban className="w-3.5 h-3.5" />
+                              Block User
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

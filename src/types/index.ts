@@ -367,6 +367,7 @@ export interface LevelTest {
   passingPercentage: number;
   isActive: boolean;
   questionCount?: number;
+  attemptCount?: number;
   questions?: TestQuestion[];
   createdAt: string;
   updatedAt: string;
@@ -413,6 +414,9 @@ export interface ManagedUserProfile {
   fullName: string;
   role: UserRole;
   createdAt: string;
+  isBlocked?: boolean;
+  blockedAt?: string | null;
+  blockedReason?: string | null;
 }
 
 // ============================================================================

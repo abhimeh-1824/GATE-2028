@@ -36,6 +36,8 @@ const MainAppContent: React.FC = () => {
     setActiveView,
     isAuthModalOpen,
     setIsAuthModalOpen,
+    blockedAccountNotice,
+    dismissBlockedAccountNotice,
     loginAsDemo,
   } = useStudy();
 
@@ -94,6 +96,21 @@ const MainAppContent: React.FC = () => {
   if (!currentUser && !isDemo) {
     return (
       <div className="min-h-screen bg-[#faf8ff]">
+        {blockedAccountNotice && (
+          <div
+            role="alert"
+            className="sticky top-0 z-50 bg-rose-700 text-white px-4 py-3 text-xs sm:text-sm font-medium flex items-center justify-between gap-4 shadow-md"
+          >
+            <span>{blockedAccountNotice}</span>
+            <button
+              type="button"
+              onClick={dismissBlockedAccountNotice}
+              className="shrink-0 px-2.5 py-1 rounded bg-white/15 hover:bg-white/25 text-xs font-semibold"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         <LandingPageView
           onOpenLogin={() => {
             setAuthModalTab('login');

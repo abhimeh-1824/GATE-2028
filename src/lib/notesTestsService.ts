@@ -91,7 +91,12 @@ function mapDbNote(row: any): StudyNote {
   };
 }
 
-function mapDbTest(row: any, questionCount?: number, creatorName?: string): LevelTest {
+function mapDbTest(
+  row: any,
+  questionCount?: number,
+  creatorName?: string,
+  attemptCount?: number
+): LevelTest {
   return {
     id: row.id,
     createdBy: row.created_by,
@@ -112,6 +117,7 @@ function mapDbTest(row: any, questionCount?: number, creatorName?: string): Leve
         : Array.isArray(row.test_questions)
           ? row.test_questions[0]?.count ?? row.test_questions.length
           : 0,
+    attemptCount: typeof attemptCount === 'number' ? attemptCount : 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -352,10 +358,17 @@ export async function fetchAllLevelTests(isDemo?: boolean): Promise<ServiceResul
   if (!live) {
     const tests = readLocal<LevelTest[]>(LOCAL_TESTS_KEY, []);
     const questions = readLocal<TestQuestion[]>(LOCAL_QUESTIONS_KEY, []);
+    const attempts = readLocal<TestAttempt[]>(LOCAL_ATTEMPTS_KEY, []);
     const countMap = new Map<string, number>();
     questions.forEach((q) => countMap.set(q.testId, (countMap.get(q.testId) || 0) + 1));
+    const attemptCountMap = new Map<string, number>();
+    attempts.forEach((a) => attemptCountMap.set(a.testId, (attemptCountMap.get(a.testId) || 0) + 1));
     return {
-      data: tests.map((t) => ({ ...t, questionCount: countMap.get(t.id) || 0 })),
+      data: tests.map((t) => ({
+        ...t,
+        questionCount: countMap.get(t.id) || 0,
+        attemptCount: attemptCountMap.get(t.id) || 0,
+      })),
       usingLocalFallback: true,
     };
   }
@@ -369,10 +382,17 @@ export async function fetchAllLevelTests(isDemo?: boolean): Promise<ServiceResul
     if (isMissingTableError(error)) {
       const tests = readLocal<LevelTest[]>(LOCAL_TESTS_KEY, []);
       const questions = readLocal<TestQuestion[]>(LOCAL_QUESTIONS_KEY, []);
+      const attempts = readLocal<TestAttempt[]>(LOCAL_ATTEMPTS_KEY, []);
       const countMap = new Map<string, number>();
       questions.forEach((q) => countMap.set(q.testId, (countMap.get(q.testId) || 0) + 1));
+      const attemptCountMap = new Map<string, number>();
+      attempts.forEach((a) => attemptCountMap.set(a.testId, (attemptCountMap.get(a.testId) || 0) + 1));
       return {
-        data: tests.map((t) => ({ ...t, questionCount: countMap.get(t.id) || 0 })),
+        data: tests.map((t) => ({
+          ...t,
+          questionCount: countMap.get(t.id) || 0,
+          attemptCount: attemptCountMap.get(t.id) || 0,
+        })),
         usingLocalFallback: true,
         error: 'Level tests are available in local workspace storage.',
       };
@@ -402,8 +422,31 @@ export async function fetchAllLevelTests(isDemo?: boolean): Promise<ServiceResul
     }
   }
 
+  const attemptCountMap = new Map<string, number>();
+  try {
+    const { data: attemptRows, error: attemptCountError } = await supabase.rpc(
+      'get_level_test_attempt_counts'
+    );
+    if (!attemptCountError && Array.isArray(attemptRows)) {
+      attemptRows.forEach((r: any) => {
+        if (r?.test_id) {
+          attemptCountMap.set(r.test_id, Number(r.attempt_count ?? 0));
+        }
+      });
+    }
+  } catch {
+    // Non-fatal fallback if migration hasn't been run yet
+  }
+
   return {
-    data: rows.map((row: any) => mapDbTest(row, undefined, creatorNameMap.get(row.created_by))),
+    data: rows.map((row: any) =>
+      mapDbTest(
+        row,
+        undefined,
+        creatorNameMap.get(row.created_by),
+        attemptCountMap.get(row.id) ?? 0
+      )
+    ),
   };
 }
 
@@ -534,11 +577,37 @@ export async function updateLevelTest(
 
 export async function deleteLevelTest(
   testId: string,
-  isDemo?: boolean
+  isDemo?: boolean,
+  options?: { isAdmin?: boolean; knownAttemptCount?: number }
 ): Promise<ServiceResult<boolean>> {
+  if (options?.isAdmin === false) {
+    return {
+      data: false,
+      error: 'Only administrators can delete tests.',
+    };
+  }
+
+  if ((options?.knownAttemptCount ?? 0) > 0) {
+    return {
+      data: false,
+      error: 'This test cannot be deleted because one or more users have already attempted it.',
+    };
+  }
+
   const { live } = await hasLiveSupabaseSession(isDemo);
 
   if (!live || !UUID_REGEX.test(testId)) {
+    const localAttempts = readLocal<TestAttempt[]>(LOCAL_ATTEMPTS_KEY, []).filter(
+      (a) => a.testId === testId
+    );
+    if (localAttempts.length > 0) {
+      return {
+        data: false,
+        error: 'This test cannot be deleted because it has already been attempted.',
+        usingLocalFallback: true,
+      };
+    }
+
     writeLocal(
       LOCAL_TESTS_KEY,
       readLocal<LevelTest[]>(LOCAL_TESTS_KEY, []).filter((t) => t.id !== testId)
@@ -547,22 +616,47 @@ export async function deleteLevelTest(
       LOCAL_QUESTIONS_KEY,
       readLocal<TestQuestion[]>(LOCAL_QUESTIONS_KEY, []).filter((q) => q.testId !== testId)
     );
-    writeLocal(
-      LOCAL_ATTEMPTS_KEY,
-      readLocal<TestAttempt[]>(LOCAL_ATTEMPTS_KEY, []).filter((a) => a.testId !== testId)
-    );
     return { data: true, usingLocalFallback: true };
   }
 
-  const { error } = await supabase.from('level_tests').delete().eq('id', testId);
-  if (error) {
-    if (isMissingTableError(error)) {
-      return deleteLevelTest(testId, true);
-    }
-    return { data: false, error: error.message };
+  // Primary path: SECURITY DEFINER RPC enforcing admin role + zero attempts across ALL users
+  const { error: rpcError } = await supabase.rpc('admin_delete_level_test', {
+    p_test_id: testId,
+  });
+
+  if (!rpcError) {
+    return { data: true };
   }
 
-  return { data: true };
+  // If the new migration has not been applied yet, fall back cleanly with an attempt check
+  if (rpcError.code === 'PGRST202') {
+    const { count, error: countError } = await supabase
+      .from('test_attempts')
+      .select('id', { count: 'exact', head: true })
+      .eq('test_id', testId);
+
+    if (!countError && (count ?? 0) > 0) {
+      return {
+        data: false,
+        error: 'This test cannot be deleted because one or more users have already attempted it.',
+      };
+    }
+
+    const { error } = await supabase.from('level_tests').delete().eq('id', testId);
+    if (error) {
+      if (isMissingTableError(error)) {
+        return deleteLevelTest(testId, true, options);
+      }
+      return { data: false, error: error.message };
+    }
+    return { data: true };
+  }
+
+  if (isMissingTableError(rpcError)) {
+    return deleteLevelTest(testId, true, options);
+  }
+
+  return { data: false, error: rpcError.message };
 }
 
 // ============================================================================
