@@ -19,9 +19,13 @@ import {
   HelpCircle,
   X,
   FileCode2,
+  Workflow,
+  Library,
+  TrendingUp,
 } from 'lucide-react';
 import { useStudy } from '../context/StudyContext';
 import { soundManager } from '../utils/audio';
+import { NavAccordionGroup, type NavChildItem } from './common/NavAccordionGroup';
 
 interface SidebarProps {
   onOpenFormulaVault: () => void;
@@ -61,13 +65,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (next) soundManager.playCompletionChime();
   };
 
-  const navItems = [
-    {
-      id: 'Dashboard',
-      label: 'Dashboard',
-      icon: LayoutDashboard,
-      badge: null,
-    },
+  // ── Standalone top-level items ──
+  const dashboardItem = {
+    id: 'Dashboard',
+    label: 'Dashboard',
+    icon: LayoutDashboard,
+  };
+
+  const chatItem = {
+    id: 'Chat',
+    label: 'Study Chat',
+    icon: MessageCircle,
+  };
+
+  // ── Academic Workflow group ──
+  const academicWorkflowChildren: NavChildItem[] = [
     {
       id: 'Daily',
       label: 'Daily Study',
@@ -89,8 +101,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: null,
     },
     {
+      id: 'Calendar',
+      label: 'Exam Calendar',
+      icon: Calendar,
+      badge: null,
+    },
+  ];
+
+  // ── Subjects & Materials group ──
+  const subjectsMaterialsChildren: NavChildItem[] = [
+    {
       id: 'Subjects',
-      label: 'Subjects & Notes',
+      label: 'Subjects & Curriculum',
       icon: BookOpen,
       badge: 'Notes & Tests',
       badgeColor: 'text-indigo-700 bg-indigo-50 font-mono font-bold',
@@ -104,26 +126,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ? 'text-emerald-700 bg-emerald-50 font-mono font-bold'
         : 'text-indigo-700 bg-indigo-50 font-mono',
     },
-    // Restore the MapPin import and syllabusPercent value when enabling Roadmap.
-    /*
-    {
-      id: 'Roadmap',
-      label: 'Roadmap 2028',
-      icon: MapPin,
-      badge: `${syllabusPercent}%`,
-      badgeColor: 'text-indigo-700 bg-indigo-50 font-mono',
-    },
-    */
+  ];
+
+  // ── Performance & Insights group ──
+  const performanceInsightsChildren: NavChildItem[] = [
     {
       id: 'Analytics',
       label: 'Analytics & Telemetry',
       icon: BarChart3,
-      badge: null,
-    },
-    {
-      id: 'Calendar',
-      label: 'Exam Calendar',
-      icon: Calendar,
       badge: null,
     },
     {
@@ -133,26 +143,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: 'Compare',
       badgeColor: 'text-indigo-700 bg-indigo-50 font-mono',
     },
-    {
-      id: 'Chat',
-      label: 'Study Chat',
-      icon: MessageCircle,
-      badge: null,
-    },
-    // Prep Guide temporarily disabled.
-    // {
-    //   id: 'Guide',
-    //   label: 'Prep Guide & Strategy',
-    //   icon: Compass,
-    //   badge: 'Handbook',
-    //   badgeColor: 'text-emerald-700 bg-emerald-50 font-bold',
-    // },
   ];
 
   const handleNavClick = (viewId: string) => {
     setActiveView(viewId);
     soundManager.playSubtleTick();
     if (onCloseMobile) onCloseMobile();
+  };
+
+  /** Render a standalone (non-grouped) navigation button */
+  const renderStandaloneItem = (item: { id: string; label: string; icon: React.FC<{ className?: string }> }) => {
+    const Icon = item.icon;
+    const isActive = activeView === item.id;
+    return (
+      <button
+        key={item.id}
+        onClick={() => handleNavClick(item.id)}
+        className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition-colors ${
+          isActive
+            ? 'bg-indigo-50 text-indigo-900 font-semibold'
+            : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+        }`}
+      >
+        <div className="flex items-center gap-2.5 truncate">
+          <Icon
+            className={`w-4 h-4 shrink-0 ${
+              isActive ? 'text-indigo-700' : 'text-slate-400'
+            }`}
+          />
+          <span className="truncate">{item.label}</span>
+        </div>
+      </button>
+    );
   };
 
   const renderContent = (isMobile: boolean) => (
@@ -196,45 +218,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Navigation Routes */}
-      <nav className="flex-1 px-2.5 py-3 space-y-1 overflow-y-auto">
-        <div className="px-2 pb-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-          Curriculum &amp; Workflow
-        </div>
+      <nav className="flex-1 px-2.5 py-3 space-y-0.5 overflow-y-auto sidebar-nav-scroll">
 
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeView === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => handleNavClick(item.id)}
-              className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition-colors ${
-                isActive
-                  ? 'bg-indigo-50 text-indigo-900 font-semibold'
-                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-              }`}
-            >
-              <div className="flex items-center gap-2.5 truncate">
-                <Icon
-                  className={`w-4 h-4 shrink-0 ${
-                    isActive ? 'text-indigo-700' : 'text-slate-400'
-                  }`}
-                />
-                <span className="truncate">{item.label}</span>
-              </div>
+        {/* 1. Dashboard — standalone */}
+        {renderStandaloneItem(dashboardItem)}
 
-              {item.badge && (
-                <span
-                  className={`text-[10px] px-1.5 py-0.5 rounded text-center shrink-0 ${
-                    item.badgeColor || 'text-slate-500 bg-slate-100'
-                  }`}
-                >
-                  {item.badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
+        {/* 2. Academic Workflow — collapsible group */}
+        <NavAccordionGroup
+          label="Academic Workflow"
+          icon={Workflow}
+          children={academicWorkflowChildren}
+          activeView={activeView}
+          onNavigate={handleNavClick}
+        />
+
+        {/* 3. Subjects & Materials — collapsible group */}
+        <NavAccordionGroup
+          label="Subjects & Materials"
+          icon={Library}
+          children={subjectsMaterialsChildren}
+          activeView={activeView}
+          onNavigate={handleNavClick}
+        />
+
+        {/* 4. Performance & Insights — collapsible group */}
+        <NavAccordionGroup
+          label="Performance & Insights"
+          icon={TrendingUp}
+          children={performanceInsightsChildren}
+          activeView={activeView}
+          onNavigate={handleNavClick}
+        />
+
+        {/* 5. Study Chat — standalone */}
+        {renderStandaloneItem(chatItem)}
 
         {/* Quick Tools Section */}
         <div className="pt-3 px-2 pb-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
