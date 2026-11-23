@@ -454,6 +454,13 @@ export const ContentStudioView: React.FC = () => {
   const [testLevel, setTestLevel] = useState<NoteEntityType>('subject');
   const [showAllTests, setShowAllTests] = useState(false);
 
+  // Allowed test durations per level (Subject / Topic / Subtopic)
+  const ALLOWED_DURATIONS: Record<NoteEntityType, number[]> = {
+    subject: [10, 20, 40],
+    topic: [10, 20],
+    subtopic: [5, 10],
+  };
+
   const [testFormMode, setTestFormMode] = useState<'create' | 'edit'>('create');
   const [editingTestId, setEditingTestId] = useState<string | null>(null);
   const [testTitle, setTestTitle] = useState('');
@@ -537,6 +544,14 @@ export const ContentStudioView: React.FC = () => {
     );
   }, [levelTests, showAllTests, testTargetContext]);
 
+  // Auto-snap duration when test level changes so it's always a valid option
+  useEffect(() => {
+    const allowed = ALLOWED_DURATIONS[testLevel];
+    if (!allowed.includes(testDuration)) {
+      setTestDuration(allowed[0]);
+    }
+  }, [testLevel]);
+
   const activeManagedTest = useMemo(
     () => levelTests.find((t) => t.id === activeManagedTestId) || null,
     [levelTests, activeManagedTestId]
@@ -571,7 +586,7 @@ export const ContentStudioView: React.FC = () => {
     setEditingTestId(null);
     setTestTitle('');
     setTestDesc('');
-    setTestDuration(20);
+    setTestDuration(ALLOWED_DURATIONS[testLevel][0]);
     setTestPassingPct(40);
     setTestIsActive(true);
   };
@@ -632,7 +647,10 @@ export const ContentStudioView: React.FC = () => {
     setEditingTestId(test.id);
     setTestTitle(test.title);
     setTestDesc(test.description || '');
-    setTestDuration(test.durationMinutes);
+    // Snap to nearest allowed duration for this test's level
+    const level = test.entityType;
+    const allowed = ALLOWED_DURATIONS[level];
+    setTestDuration(allowed.includes(test.durationMinutes) ? test.durationMinutes : allowed[0]);
     setTestPassingPct(test.passingPercentage);
     setTestIsActive(test.isActive);
   };
@@ -1795,16 +1813,22 @@ export const ContentStudioView: React.FC = () => {
                 <div className="grid grid-cols-2 gap-2.5">
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                      Duration (mins)
+                      Duration
                     </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={240}
+                    <select
                       value={testDuration}
                       onChange={(e) => setTestDuration(Number(e.target.value))}
-                      className="w-full px-3 py-1.5 text-xs font-mono border border-slate-200 rounded-lg"
-                    />
+                      className="w-full px-3 py-1.5 text-xs font-mono border border-slate-200 rounded-lg bg-white"
+                    >
+                      {ALLOWED_DURATIONS[testFormMode === 'edit' && editingTestId
+                        ? (levelTests.find((t) => t.id === editingTestId)?.entityType || testLevel)
+                        : testLevel
+                      ].map((mins) => (
+                        <option key={mins} value={mins}>
+                          {mins} min
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-600 mb-1">
