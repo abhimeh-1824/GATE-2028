@@ -316,7 +316,7 @@ export const TestsView: React.FC = () => {
             <RefreshCw className={`w-3.5 h-3.5 ${notesTestsLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-          <button
+          {/* <button
             type="button"
             onClick={() => setActiveView('ContentStudio')}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-semibold whitespace-nowrap shadow-2xs"
@@ -326,7 +326,7 @@ export const TestsView: React.FC = () => {
             <span className="ml-1 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-200 font-mono text-[10px] font-bold">
               +25
             </span>
-          </button>
+          </button> */}
         </div>
       </header>
 
