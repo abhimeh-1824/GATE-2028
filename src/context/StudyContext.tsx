@@ -563,7 +563,15 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           };
           saveAccountLocally(verifiedUser);
           setActiveUserId(verifiedUser.id);
-          setCurrentUser(verifiedUser);
+          setCurrentUser((prev) =>
+            prev &&
+            prev.id === verifiedUser.id &&
+            prev.email === verifiedUser.email &&
+            prev.fullName === verifiedUser.fullName &&
+            prev.isDemo === false
+              ? prev
+              : verifiedUser
+          );
           setIsDemo(false);
           setAllUsers(getSavedAccounts());
         }
@@ -604,7 +612,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return () => {
       active = false;
     };
-  }, [currentUser, isDemo, ensureChatGroupMembership]);
+  }, [currentUser?.id, isDemo, ensureChatGroupMembership]);
 
   useEffect(() => {
     if (!currentUser || isDemo) {
@@ -726,22 +734,27 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, []);
 
-  // Persist the complete real-user study state to Supabase; demo state remains memory-only.
+  // Persist the complete real-user study state to Supabase (debounced to prevent burst writes on load).
   useEffect(() => {
-    if (isSwitchingUser || authLoading || isDemo || !currentUser || !cloudStateLoaded) return;
+    if (isSwitchingUser || authLoading || isDemo || !currentUser?.id || !cloudStateLoaded) return;
 
-    void saveUserStudyState(currentUser.id, {
-      subjects,
-      tasks,
-      sprints,
-      mockTests,
-      milestones,
-      calendarEvents,
-      settings,
-      baseLoggedHours,
-    }).catch((error) => {
-      console.warn('Could not persist cloud user study state:', error);
-    });
+    const userId = currentUser.id;
+    const timer = window.setTimeout(() => {
+      void saveUserStudyState(userId, {
+        subjects,
+        tasks,
+        sprints,
+        mockTests,
+        milestones,
+        calendarEvents,
+        settings,
+        baseLoggedHours,
+      }).catch((error) => {
+        console.warn('Could not persist cloud user study state:', error);
+      });
+    }, 1500);
+
+    return () => window.clearTimeout(timer);
   }, [
     subjects,
     tasks,
@@ -751,7 +764,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     calendarEvents,
     settings,
     baseLoggedHours,
-    currentUser,
+    currentUser?.id,
     isDemo,
     isSwitchingUser,
     authLoading,
@@ -1466,17 +1479,31 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const isAdmin = userRole === 'admin';
   const canManageContent = userRole === 'admin' || userRole === 'content_manager';
 
-  const refreshNotesAndTests = useCallback(async () => {
+  const canManageContentRef = React.useRef(canManageContent);
+  canManageContentRef.current = canManageContent;
+  const currentUserRef = React.useRef(currentUser);
+  currentUserRef.current = currentUser;
+  const userRoleRef = React.useRef(userRole);
+  userRoleRef.current = userRole;
+  const levelTestsRef = React.useRef(levelTests);
+  levelTestsRef.current = levelTests;
+  const testAttemptsRef = React.useRef(testAttempts);
+  testAttemptsRef.current = testAttempts;
+  const coinsLoadedOnceRef = React.useRef(false);
+
+  const refreshNotesAndTests = useCallback(async (canManageOverride?: boolean) => {
+    const uid = currentUserRef.current?.id;
+    const allowContentSync = canManageOverride ?? canManageContentRef.current;
     setNotesTestsLoading(true);
     try {
-      if (canManageContent && !isDemo) {
+      if (allowContentSync && !isDemo) {
         await syncLocalStudyNotesToCloud(isDemo);
       }
 
       const [notesRes, testsRes, attemptsRes] = await Promise.all([
         fetchAllStudyNotes(isDemo),
         fetchAllLevelTests(isDemo),
-        fetchTestAttempts(currentUser?.id, undefined, isDemo),
+        fetchTestAttempts(uid, undefined, isDemo),
       ]);
       setStudyNotes(notesRes.data);
       setLevelTests(testsRes.data);
@@ -1493,20 +1520,23 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } finally {
       setNotesTestsLoading(false);
     }
-  }, [currentUser?.id, isDemo, canManageContent]);
+  }, [currentUser?.id, isDemo]);
 
   useEffect(() => {
     let active = true;
     const syncRoleAndContent = async () => {
-      if (!currentUser) {
+      const user = currentUserRef.current;
+      if (!user) {
         if (active) setUserRole('student');
         return;
       }
-      if (isDemo || currentUser.isDemo) {
-        if (active) setUserRole(currentUser.role || 'admin');
+      let resolvedRole: UserRole = 'student';
+      if (isDemo || user.isDemo) {
+        resolvedRole = user.role || 'admin';
+        if (active) setUserRole(resolvedRole);
       } else {
         // Immediately verify the user has not been blocked by an administrator
-        const blockStatus = await fetchUserBlockStatus(currentUser.id);
+        const blockStatus = await fetchUserBlockStatus(user.id);
         if (!active) return;
         if (blockStatus.isBlocked) {
           await signOutUser();
@@ -1523,11 +1553,12 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return;
         }
 
-        const fetchedRole = await fetchUserRole(currentUser.id);
-        if (active) setUserRole(fetchedRole);
+        resolvedRole = await fetchUserRole(user.id);
+        if (active) setUserRole(resolvedRole);
       }
       if (active) {
-        await refreshNotesAndTests();
+        const allowManage = resolvedRole === 'admin' || resolvedRole === 'content_manager';
+        await refreshNotesAndTests(allowManage);
       }
     };
     syncRoleAndContent();
@@ -1571,38 +1602,43 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const refreshCoinsAndLeaderboard = useCallback(async () => {
-    if (!currentUser) {
+    const user = currentUserRef.current;
+    if (!user) {
+      coinsLoadedOnceRef.current = false;
       setCoinBalance(0);
       setCoinTransactions([]);
       setLeaderboard([]);
       return;
     }
-    setCoinsLoading(true);
+    if (!coinsLoadedOnceRef.current) {
+      setCoinsLoading(true);
+    }
     try {
-      const coinState = await fetchCoinState(currentUser.id, isDemo);
+      const coinState = await fetchCoinState(user.id, isDemo);
       setCoinBalance(coinState.balance);
       setCoinTransactions(coinState.transactions);
 
       const lbRes = await fetchCoinLeaderboard({
-        currentUserId: currentUser.id,
-        currentUserName: currentUser.fullName,
-        currentUserRole: userRole,
+        currentUserId: user.id,
+        currentUserName: user.fullName,
+        currentUserRole: userRoleRef.current,
         currentUserBalance: coinState.balance,
-        levelTests,
-        testAttempts,
+        levelTests: levelTestsRef.current,
+        testAttempts: testAttemptsRef.current,
         isDemo,
       });
       setLeaderboard(lbRes.entries);
+      coinsLoadedOnceRef.current = true;
     } catch (err) {
       console.warn('Error refreshing coins & leaderboard:', err);
     } finally {
       setCoinsLoading(false);
     }
-  }, [currentUser, isDemo, userRole, levelTests, testAttempts]);
+  }, [currentUser?.id, isDemo]);
 
   useEffect(() => {
-    refreshCoinsAndLeaderboard();
-  }, [refreshCoinsAndLeaderboard]);
+    void refreshCoinsAndLeaderboard();
+  }, [refreshCoinsAndLeaderboard, levelTests.length, testAttempts.length]);
 
   const addLevelTest: StudyContextType['addLevelTest'] = async (input) => {
     const res = await createLevelTest({
@@ -2204,7 +2240,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       clearTimeout(timeout);
       abortController.abort();
     };
-  }, [subjects, tasks, mockTests, totalHoursStudied, linkedAppletConfig.autoSync, currentUser, isDemo, settings]);
+  }, [subjects, tasks, mockTests, totalHoursStudied, linkedAppletConfig.autoSync, currentUser?.id, isDemo, settings]);
 
   return (
     <StudyContext.Provider

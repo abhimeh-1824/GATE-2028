@@ -1,16 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   AlertTriangle,
-  RotateCcw,
   Play,
-  ArrowRight,
-  TrendingDown,
-  Target,
-  Sparkles,
   BookOpen,
   CheckCircle2,
   RefreshCw,
-  Clock
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
 import { TopicNeedingRevision, fetchTopicsNeedingRevision } from '../../lib/supabaseService';
@@ -23,29 +17,96 @@ interface NeedsRevisionWidgetProps {
 
 export const NeedsRevisionWidget: React.FC<NeedsRevisionWidgetProps> = ({
   onSelectSubject,
-  onOpenFormulaVault,
 }) => {
-  const { subjects, currentUser, setActiveView, setTimerSubject, setTimerMode, startTimer, updateTopicConfidence, updateTopicStatus } = useStudy();
+  const {
+    subjects,
+    currentUser,
+    setActiveView,
+    setTimerSubject,
+    setTimerMode,
+    startTimer,
+    updateTopicConfidence,
+    updateTopicStatus,
+  } = useStudy();
 
-  const [topics, setTopics] = useState<TopicNeedingRevision[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [remoteTopics, setRemoteTopics] = useState<TopicNeedingRevision[] | null>(null);
+  const [resolvedIds, setResolvedIds] = useState<Set<string>>(() => new Set());
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [filterType, setFilterType] = useState<'all' | 'score' | 'accuracy' | 'both'>('all');
+  const subjectsRef = useRef(subjects);
+  subjectsRef.current = subjects;
 
-  const loadData = async () => {
-    setIsLoading(true);
-    try {
-      const res = await fetchTopicsNeedingRevision(currentUser?.id, subjects);
-      setTopics(res);
-    } catch (e) {
-      console.error('Error fetching topics needing revision:', e);
-    } finally {
-      setIsLoading(false);
+  // Derive flagged topics immediately from subjects (zero flicker or spinner jump on state updates)
+  const localTopics = useMemo<TopicNeedingRevision[]>(() => {
+    const list: TopicNeedingRevision[] = [];
+    for (const subj of subjects) {
+      for (const topic of subj.topics) {
+        const avgScore = (topic.confidenceScore || 3) * 2;
+        const pyqAcc = topic.pyqAccuracy || 0;
+        if (avgScore < 6 || pyqAcc < 60) {
+          const reason: 'low_score' | 'low_accuracy' | 'both' =
+            avgScore < 6 && pyqAcc < 60 ? 'both' : avgScore < 6 ? 'low_score' : 'low_accuracy';
+          list.push({
+            id: topic.id,
+            title: topic.title,
+            subjectId: subj.id,
+            subjectName: subj.name,
+            averageScore: avgScore,
+            pyqAccuracy: pyqAcc,
+            reason,
+            status: topic.status,
+            weightageTier: topic.weightageTier,
+            pyqsSolved: topic.pyqsSolved,
+            pyqsTotal: topic.pyqsTotal,
+            subtopics: topic.subtopics,
+          });
+        }
+      }
     }
-  };
+    return list;
+  }, [subjects]);
+
+  // Silent background sync once per logged-in user (no collapsing spinner!)
+  const syncFromCloud = useCallback(
+    async (showSpin: boolean) => {
+      if (!currentUser?.id) return;
+      if (showSpin) setIsRefreshing(true);
+      try {
+        const res = await fetchTopicsNeedingRevision(currentUser.id, subjectsRef.current);
+        setRemoteTopics(res);
+      } catch (e) {
+        console.error('Error fetching topics needing revision:', e);
+      } finally {
+        if (showSpin) setIsRefreshing(false);
+      }
+    },
+    [currentUser?.id]
+  );
 
   useEffect(() => {
-    loadData();
-  }, [subjects, currentUser?.id]);
+    setRemoteTopics(null);
+    setResolvedIds(new Set());
+    if (!currentUser?.id) return;
+    void syncFromCloud(false);
+  }, [currentUser?.id, syncFromCloud]);
+
+  // Merge local subjects (always fresh) with any cloud-only flagged records
+  const topics = useMemo(() => {
+    const merged = new Map<string, TopicNeedingRevision>();
+    for (const t of localTopics) {
+      if (!resolvedIds.has(t.id)) {
+        merged.set(t.id, t);
+      }
+    }
+    if (remoteTopics) {
+      for (const t of remoteTopics) {
+        if (!resolvedIds.has(t.id) && !merged.has(t.id)) {
+          merged.set(t.id, t);
+        }
+      }
+    }
+    return Array.from(merged.values());
+  }, [localTopics, remoteTopics, resolvedIds]);
 
   const handleStartDrill = (topic: TopicNeedingRevision) => {
     setTimerSubject(topic.subjectId, topic.title);
@@ -64,21 +125,22 @@ export const NeedsRevisionWidget: React.FC<NeedsRevisionWidgetProps> = ({
   };
 
   const handleMarkResolved = (topic: TopicNeedingRevision) => {
-    // Elevate confidence to 4 and mark completed/in_progress
     updateTopicConfidence(topic.subjectId, topic.id, 4);
     updateTopicStatus(topic.subjectId, topic.id, 'completed');
     soundManager.playCompletionChime();
-    // Optimistically update list
-    setTopics((prev) => prev.filter((t) => t.id !== topic.id));
+    setResolvedIds((prev) => new Set(prev).add(topic.id));
   };
 
-  // Filter topics
-  const filteredTopics = topics.filter((t) => {
-    if (filterType === 'score') return t.averageScore < 6;
-    if (filterType === 'accuracy') return t.pyqAccuracy < 60;
-    if (filterType === 'both') return t.reason === 'both';
-    return true;
-  });
+  const filteredTopics = useMemo(
+    () =>
+      topics.filter((t) => {
+        if (filterType === 'score') return t.averageScore < 6;
+        if (filterType === 'accuracy') return t.pyqAccuracy < 60;
+        if (filterType === 'both') return t.reason === 'both';
+        return true;
+      }),
+    [topics, filterType]
+  );
 
   const bothCount = topics.filter((t) => t.reason === 'both').length;
   const scoreCount = topics.filter((t) => t.averageScore < 6).length;
@@ -86,7 +148,7 @@ export const NeedsRevisionWidget: React.FC<NeedsRevisionWidgetProps> = ({
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-4">
-      {/* Header with Title and Telemetry */}
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
         <div className="space-y-0.5">
           <div className="flex items-center gap-2">
@@ -101,11 +163,12 @@ export const NeedsRevisionWidget: React.FC<NeedsRevisionWidgetProps> = ({
             </h2>
           </div>
           <p className="text-[11px] text-slate-500">
-            Automated Supabase audit: topics flagged with <strong className="text-slate-700">score &lt; 6.0/10</strong> or <strong className="text-slate-700">PYQ accuracy &lt; 60%</strong>.
+            Topics flagged with <strong className="text-slate-700">score &lt; 6.0/10</strong> or{' '}
+            <strong className="text-slate-700">PYQ accuracy &lt; 60%</strong>.
           </p>
         </div>
 
-        {/* Filter controls & Refresh */}
+        {/* Filter controls & Manual Refresh */}
         <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
           <div className="flex items-center bg-slate-100 p-0.5 rounded-lg text-[11px] font-medium text-slate-600">
             <button
@@ -143,30 +206,25 @@ export const NeedsRevisionWidget: React.FC<NeedsRevisionWidgetProps> = ({
           </div>
 
           <button
-            onClick={loadData}
-            title="Refresh from Supabase"
-            disabled={isLoading}
+            onClick={() => void syncFromCloud(true)}
+            title="Refresh revision list"
+            disabled={isRefreshing}
             className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-colors disabled:opacity-50"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
 
       {/* Topics List or Empty State */}
-      {isLoading ? (
-        <div className="py-8 text-center text-xs text-slate-400 font-mono flex items-center justify-center gap-2">
-          <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-600" />
-          <span>Auditing Supabase records for topics needing revision...</span>
-        </div>
-      ) : filteredTopics.length === 0 ? (
+      {filteredTopics.length === 0 ? (
         <div className="p-6 rounded-xl bg-emerald-50/60 border border-emerald-200 text-center space-y-1.5">
           <CheckCircle2 className="w-6 h-6 text-emerald-600 mx-auto" />
           <h3 className="text-xs font-bold text-emerald-900">
             High Retention Benchmark Achieved
           </h3>
           <p className="text-[11px] text-emerald-700 max-w-md mx-auto">
-            All evaluated topics meet or exceed the minimum threshold of $\ge 6.0/10$ score and $\ge 60\%$ PYQ accuracy. Excellent precision!
+            All evaluated topics meet or exceed the minimum threshold of ≥ 6.0/10 score and ≥ 60% PYQ accuracy.
           </p>
         </div>
       ) : (
@@ -239,7 +297,7 @@ export const NeedsRevisionWidget: React.FC<NeedsRevisionWidgetProps> = ({
                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5">
                   <button
                     onClick={() => handleStartDrill(topic)}
-                    title="Launch 25-minute Pomodoro study sprint"
+                    title="Launch 25-minute focus sprint"
                     className="flex-1 py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1 transition-colors"
                   >
                     <Play className="w-3 h-3 fill-indigo-700" />
