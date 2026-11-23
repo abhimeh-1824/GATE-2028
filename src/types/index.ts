@@ -419,6 +419,20 @@ export interface ManagedUserProfile {
   blockedReason?: string | null;
 }
 
+export interface PendingRegistrationRequest {
+  id: string;
+  kind: 'fallback_request' | 'unconfirmed_auth_user';
+  email: string;
+  fullName: string;
+  targetAir: number;
+  targetCollege: string;
+  sourceReason: 'rate_limit_fallback' | 'email_unconfirmed' | 'manual_request' | string;
+  status: 'pending' | 'approved' | 'rejected';
+  rejectionReason?: string | null;
+  createdAt: string;
+  reviewedAt?: string | null;
+}
+
 // ============================================================================
 // Coin System & Competitive Leaderboard Types
 // ============================================================================

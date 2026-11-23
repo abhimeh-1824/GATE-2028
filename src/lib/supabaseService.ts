@@ -12,12 +12,77 @@ import {
   UserRole,
   SubtopicItem,
   ManagedUserProfile,
+  PendingRegistrationRequest,
 } from '../types';
 
 export interface AuthResponse {
   user: AuthUser | null;
   error: string | null;
   needsEmailConfirmation?: boolean;
+  pendingAdminApproval?: boolean;
+  approvalMessage?: string;
+}
+
+const APPROVAL_MIGRATION_HINT =
+  'Run the SQL migration (supabase/migrations/20261123_admin_registration_approval.sql) in Supabase SQL Editor to enable the Admin Approval fallback queue.';
+
+export function isEmailRateLimitError(message?: string | null, status?: number): boolean {
+  if (status === 429) return true;
+  const lower = (message || '').toLowerCase();
+  return (
+    lower.includes('rate limit') ||
+    lower.includes('too many requests') ||
+    lower.includes('429') ||
+    lower.includes('over_email_send_rate_limit') ||
+    lower.includes('error sending confirmation') ||
+    lower.includes('sending confirmation email') ||
+    lower.includes('email quota') ||
+    lower.includes('smtp')
+  );
+}
+
+/**
+ * Fallback registration queue when Supabase Auth email quota is exhausted or
+ * email verification cannot be delivered. Password is bcrypt-hashed inside Postgres.
+ */
+export async function submitPendingRegistrationFallback(
+  email: string,
+  password: string,
+  fullName: string,
+  targetAir: number = 1,
+  targetCollege: string = 'IISc Bangalore (M.Tech AI)',
+  sourceReason: 'rate_limit_fallback' | 'email_unconfirmed' | 'manual_request' = 'rate_limit_fallback'
+): Promise<{ success: boolean; error?: string; message?: string }> {
+  try {
+    const { error } = await supabase.rpc('submit_pending_registration', {
+      p_email: email.trim().toLowerCase(),
+      p_password: password,
+      p_full_name: fullName.trim(),
+      p_target_air: targetAir || 1,
+      p_target_college: targetCollege || 'IISc Bangalore (M.Tech AI)',
+      p_source_reason: sourceReason,
+    });
+
+    if (error) {
+      if (error.code === 'PGRST202') {
+        return { success: false, error: APPROVAL_MIGRATION_HINT };
+      }
+      return { success: false, error: error.message };
+    }
+
+    return {
+      success: true,
+      message:
+        sourceReason === 'email_unconfirmed'
+          ? 'Admin Approval requested! Once an Admin approves your account, you can sign in directly without email verification.'
+          : 'Email verification limit reached — your registration has been submitted for Admin Approval! Once approved by an Admin, you can sign in directly with your email and password (no email verification needed).',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Could not submit registration for admin approval.',
+    };
+  }
 }
 
 export interface TopicNeedingRevision {
@@ -79,6 +144,29 @@ export async function signUpUser(
     });
 
     if (error) {
+      // Automatic fallback when Supabase Auth email rate limit (429 / SMTP quota) is exceeded
+      if (isEmailRateLimitError(error.message, (error as any)?.status)) {
+        const fallback = await submitPendingRegistrationFallback(
+          email,
+          password,
+          fullName,
+          targetAir,
+          targetCollege,
+          'rate_limit_fallback'
+        );
+        if (fallback.success) {
+          return {
+            user: null,
+            error: null,
+            pendingAdminApproval: true,
+            approvalMessage: fallback.message,
+          };
+        }
+        return {
+          user: null,
+          error: fallback.error || error.message,
+        };
+      }
       // If user already exists, suggest sign in
       return { user: null, error: error.message };
     }
@@ -144,13 +232,55 @@ export async function signInUser(email: string, password: string): Promise<AuthR
     });
 
     if (error) {
-      if (error.message.toLowerCase().includes('email not confirmed')) {
+      const lowerMsg = error.message.toLowerCase();
+      if (lowerMsg.includes('email not confirmed')) {
         return {
           user: null,
-          error: 'Your email address is not yet confirmed. Please verify your email via the confirmation link or contact support.',
+          error:
+            'Your email address is not confirmed yet. Verify via the link in your inbox, or click "Request Admin Approval" below to activate without email verification.',
           needsEmailConfirmation: true,
         };
       }
+
+      if (lowerMsg.includes('invalid login credentials') || lowerMsg.includes('invalid credentials')) {
+        try {
+          const { data: pendingRows, error: pendingErr } = await supabase.rpc(
+            'check_pending_registration_status',
+            { p_email: email.trim().toLowerCase() }
+          );
+          if (!pendingErr && Array.isArray(pendingRows) && pendingRows.length > 0) {
+            const status = pendingRows[0]?.status;
+            const rejectionReason = pendingRows[0]?.rejection_reason;
+            if (status === 'pending') {
+              return {
+                user: null,
+                error:
+                  'Your registration is waiting for Admin Approval. Once an Admin approves your account, you can sign in directly without email verification.',
+                pendingAdminApproval: true,
+              };
+            }
+            if (status === 'rejected') {
+              return {
+                user: null,
+                error: rejectionReason
+                  ? `Your registration request was declined by an administrator: ${rejectionReason}`
+                  : 'Your registration request was declined by an administrator.',
+              };
+            }
+            if (status === 'unconfirmed') {
+              return {
+                user: null,
+                error:
+                  'Your email address is not confirmed yet. Click "Request Admin Approval" below so an Admin can activate your account without email verification.',
+                needsEmailConfirmation: true,
+              };
+            }
+          }
+        } catch {
+          // Ignore status lookup failure and return standard credential error
+        }
+      }
+
       return { user: null, error: error.message };
     }
 
@@ -842,6 +972,112 @@ export async function setManagedUserBlocked(
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err?.message || 'Failed to update user block status.' };
+  }
+}
+
+/**
+ * Admin: Fetch all pending fallback registrations and unconfirmed auth.users accounts.
+ */
+export async function fetchPendingRegistrations(): Promise<{
+  requests: PendingRegistrationRequest[];
+  error?: string;
+  migrationRequired?: boolean;
+}> {
+  try {
+    const { data, error } = await supabase.rpc('admin_list_pending_registrations');
+    if (error) {
+      if (error.code === 'PGRST202') {
+        return {
+          requests: [],
+          error: APPROVAL_MIGRATION_HINT,
+          migrationRequired: true,
+        };
+      }
+      return { requests: [], error: error.message };
+    }
+
+    const rows = Array.isArray(data) ? data : [];
+    return {
+      requests: rows.map((row: any) => ({
+        id: String(row.id),
+        kind: row.kind === 'unconfirmed_auth_user' ? 'unconfirmed_auth_user' : 'fallback_request',
+        email: String(row.email || ''),
+        fullName: String(row.full_name || 'Aspirant'),
+        targetAir: Number(row.target_air) || 1,
+        targetCollege: String(row.target_college || 'IISc Bangalore (M.Tech AI)'),
+        sourceReason: String(row.source_reason || 'rate_limit_fallback'),
+        status:
+          row.status === 'approved' || row.status === 'rejected' ? row.status : 'pending',
+        rejectionReason: row.rejection_reason ?? null,
+        createdAt: row.created_at || new Date().toISOString(),
+        reviewedAt: row.reviewed_at ?? null,
+      })),
+    };
+  } catch (err: any) {
+    return {
+      requests: [],
+      error: err?.message || 'Failed to load pending registration requests.',
+    };
+  }
+}
+
+/**
+ * Admin: Approve a pending fallback registration (or unconfirmed user) so they can sign in immediately without email verification.
+ */
+export async function approvePendingRegistration(
+  requestId: string,
+  kind: 'fallback_request' | 'unconfirmed_auth_user' = 'fallback_request'
+): Promise<{ success: boolean; email?: string; fullName?: string; error?: string }> {
+  try {
+    const { data, error } = await supabase.rpc('admin_approve_pending_registration', {
+      p_request_id: requestId,
+      p_kind: kind,
+    });
+    if (error) {
+      if (error.code === 'PGRST202') {
+        return { success: false, error: APPROVAL_MIGRATION_HINT };
+      }
+      return { success: false, error: error.message };
+    }
+    return {
+      success: true,
+      email: data?.email,
+      fullName: data?.full_name,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Failed to approve registration request.',
+    };
+  }
+}
+
+/**
+ * Admin: Reject a pending registration request.
+ */
+export async function rejectPendingRegistration(
+  requestId: string,
+  reason?: string,
+  kind: 'fallback_request' | 'unconfirmed_auth_user' = 'fallback_request'
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.rpc('admin_reject_pending_registration', {
+      p_request_id: requestId,
+      p_reason: reason?.trim() || null,
+      p_kind: kind,
+    });
+    if (error) {
+      if (error.code === 'PGRST202') {
+        return { success: false, error: APPROVAL_MIGRATION_HINT };
+      }
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Failed to reject registration request.',
+    };
   }
 }
 

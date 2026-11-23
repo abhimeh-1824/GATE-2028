@@ -24,6 +24,9 @@ import {
   Lock,
   Ban,
   UserCheck,
+  UserPlus,
+  Clock,
+  XCircle,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
 import {
@@ -35,6 +38,7 @@ import {
   CorrectOptionKey,
   TestDifficulty,
   ManagedUserProfile,
+  PendingRegistrationRequest,
   UserRole,
 } from '../../types';
 import { sanitizeEducationalHtml, buildSandboxedSrcDoc } from '../../utils/htmlSanitizer';
@@ -51,9 +55,12 @@ import {
   fetchAllManagedProfiles,
   updateManagedUserRole,
   setManagedUserBlocked,
+  fetchPendingRegistrations,
+  approvePendingRegistration,
+  rejectPendingRegistration,
+  getDeterministicUuid,
 } from '../../lib/supabaseService';
 import { TestRunnerModal } from '../modals/TestRunnerModal';
-import { getDeterministicUuid } from '../../lib/supabaseService';
 
 type StudioTab = 'hierarchy' | 'notes' | 'tests' | 'roles';
 
@@ -792,7 +799,7 @@ export const ContentStudioView: React.FC = () => {
   };
 
   // ============================================================================
-  // TAB 4: ROLE MANAGEMENT (ADMIN ONLY)
+  // TAB 4: ROLE MANAGEMENT & REGISTRATION APPROVALS (ADMIN ONLY)
   // ============================================================================
   const [profiles, setProfiles] = useState<ManagedUserProfile[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
@@ -800,6 +807,34 @@ export const ContentStudioView: React.FC = () => {
   const [pendingBlockUserId, setPendingBlockUserId] = useState<string | null>(null);
   const [blockReasonDraft, setBlockReasonDraft] = useState<string>('');
   const [updatingBlockUserId, setUpdatingBlockUserId] = useState<string | null>(null);
+
+  const [approvalRequests, setApprovalRequests] = useState<PendingRegistrationRequest[]>([]);
+  const [loadingApprovals, setLoadingApprovals] = useState(false);
+  const [approvalsError, setApprovalsError] = useState<string | null>(null);
+  const [approvalFilter, setApprovalFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [processingApprovalId, setProcessingApprovalId] = useState<string | null>(null);
+  const [pendingRejectId, setPendingRejectId] = useState<string | null>(null);
+  const [rejectReasonDraft, setRejectReasonDraft] = useState<string>('');
+
+  const pendingApprovalsCount = useMemo(
+    () => approvalRequests.filter((r) => r.status === 'pending').length,
+    [approvalRequests]
+  );
+
+  const filteredApprovalRequests = useMemo(() => {
+    if (approvalFilter === 'all') return approvalRequests;
+    return approvalRequests.filter((r) => r.status === approvalFilter);
+  }, [approvalRequests, approvalFilter]);
+
+  const loadPendingApprovals = async () => {
+    if (!isAdmin || isDemo) return;
+    setLoadingApprovals(true);
+    setApprovalsError(null);
+    const res = await fetchPendingRegistrations();
+    if (res.error) setApprovalsError(res.error);
+    setApprovalRequests(res.requests);
+    setLoadingApprovals(false);
+  };
 
   const loadProfiles = async () => {
     if (!isAdmin || isDemo) return;
@@ -811,11 +846,50 @@ export const ContentStudioView: React.FC = () => {
     setLoadingProfiles(false);
   };
 
+  // Preload pending approval requests for admins so the tab badge is immediately visible
+  useEffect(() => {
+    if (isAdmin && !isDemo) {
+      void loadPendingApprovals();
+    }
+  }, [isAdmin, isDemo]);
+
   useEffect(() => {
     if (activeTab === 'roles' && isAdmin && !isDemo) {
-      loadProfiles();
+      void loadProfiles();
+      void loadPendingApprovals();
     }
   }, [activeTab, isAdmin, isDemo]);
+
+  const handleApproveRegistration = async (req: PendingRegistrationRequest) => {
+    setProcessingApprovalId(req.id);
+    const res = await approvePendingRegistration(req.id, req.kind);
+    setProcessingApprovalId(null);
+
+    if (res.success) {
+      showFeedback(
+        'success',
+        `${req.fullName} (${req.email}) approved! They can now sign in directly without email verification.`
+      );
+      await Promise.all([loadPendingApprovals(), loadProfiles()]);
+    } else {
+      showFeedback('error', res.error || 'Could not approve registration request.');
+    }
+  };
+
+  const handleRejectRegistration = async (req: PendingRegistrationRequest, reason?: string) => {
+    setProcessingApprovalId(req.id);
+    const res = await rejectPendingRegistration(req.id, reason, req.kind);
+    setProcessingApprovalId(null);
+
+    if (res.success) {
+      setPendingRejectId(null);
+      setRejectReasonDraft('');
+      showFeedback('success', `Registration request for ${req.email} was declined.`);
+      await loadPendingApprovals();
+    } else {
+      showFeedback('error', res.error || 'Could not reject registration request.');
+    }
+  };
 
   const handleChangeUserRole = async (userId: string, role: UserRole) => {
     const res = await updateManagedUserRole(userId, role);
@@ -994,7 +1068,12 @@ export const ContentStudioView: React.FC = () => {
             }`}
           >
             <Shield className="w-4 h-4" />
-            4. Role Access (Admin)
+            <span>4. Approvals &amp; Users (Admin)</span>
+            {pendingApprovalsCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 font-mono">
+                {pendingApprovalsCount}
+              </span>
+            )}
           </button>
         )}
       </div>
@@ -2388,18 +2467,253 @@ export const ContentStudioView: React.FC = () => {
       )}
 
       {/* ===================================================================== */}
-      {/* TAB 4: ADMIN ROLE DELEGATION & USER MODERATION                        */}
+      {/* TAB 4: ADMIN REGISTRATION APPROVALS, ROLES & USER MODERATION          */}
       {/* ===================================================================== */}
       {activeTab === 'roles' && isAdmin && (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-bold text-slate-900">User Roles &amp; Access Moderation</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Assign roles or block any non-admin user. Blocked users are signed out and prevented
-                from logging in until unblocked.
-              </p>
+        <div className="space-y-6">
+          {/* Section A: Pending Registration Approvals (Fallback & Unconfirmed Email Queue) */}
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <UserPlus className="w-4 h-4 text-indigo-700" />
+                  <h2 className="text-sm font-bold text-slate-900">
+                    Pending Registration Approvals
+                  </h2>
+                  {pendingApprovalsCount > 0 && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 font-mono">
+                      {pendingApprovalsCount} awaiting approval
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  When email limits are exhausted or verification emails are not received, new
+                  aspirants appear here. Approving activates their account immediately — no email
+                  verification required.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[11px] font-semibold">
+                  {(
+                    [
+                      { key: 'pending', label: `Pending (${pendingApprovalsCount})` },
+                      { key: 'approved', label: 'Approved' },
+                      { key: 'rejected', label: 'Rejected' },
+                      { key: 'all', label: 'All' },
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => setApprovalFilter(tab.key)}
+                      className={`px-2.5 py-1 rounded-md transition-colors ${
+                        approvalFilter === tab.key
+                          ? 'bg-white text-indigo-700 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {!isDemo && (
+                  <button
+                    type="button"
+                    onClick={() => void loadPendingApprovals()}
+                    className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Refresh Queue
+                  </button>
+                )}
+              </div>
             </div>
+
+            {isDemo ? (
+              <div className="p-8 text-center text-xs text-slate-500">
+                Sign in with a live Supabase Admin account to review and approve student registrations.
+              </div>
+            ) : loadingApprovals ? (
+              <div className="p-8 text-center text-xs text-slate-400">
+                Loading registration approval queue...
+              </div>
+            ) : approvalsError ? (
+              <div className="p-5 text-xs text-amber-900 bg-amber-50 border-t border-amber-100 flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold">Approval queue database setup required</p>
+                  <p className="text-[11px] text-amber-800 mt-0.5">{approvalsError}</p>
+                </div>
+              </div>
+            ) : filteredApprovalRequests.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-500">
+                {approvalFilter === 'pending'
+                  ? 'No pending registration requests right now. All aspirants are up to date.'
+                  : `No ${approvalFilter} registration requests found.`}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                    <tr>
+                      <th className="text-left px-5 py-2.5 font-semibold">Aspirant</th>
+                      <th className="text-left px-4 py-2.5 font-semibold">Target</th>
+                      <th className="text-left px-4 py-2.5 font-semibold">Source</th>
+                      <th className="text-left px-4 py-2.5 font-semibold">Requested</th>
+                      <th className="text-right px-5 py-2.5 font-semibold">Decision</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredApprovalRequests.map((req) => {
+                      const isProcessing = processingApprovalId === req.id;
+                      const isRejecting = pendingRejectId === req.id;
+                      const sourceLabel =
+                        req.sourceReason === 'rate_limit_fallback'
+                          ? 'Email Limit Fallback'
+                          : req.sourceReason === 'email_unconfirmed'
+                            ? 'Unconfirmed Email'
+                            : 'Direct Approval Request';
+
+                      return (
+                        <tr
+                          key={`${req.kind}_${req.id}`}
+                          className={req.status === 'pending' ? 'bg-amber-50/20 hover:bg-amber-50/40' : 'hover:bg-slate-50'}
+                        >
+                          <td className="px-5 py-3">
+                            <div className="font-semibold text-slate-900">{req.fullName}</div>
+                            <div className="font-mono text-[11px] text-slate-500 mt-0.5">{req.email}</div>
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            <div className="font-mono text-[11px] font-semibold text-indigo-700">
+                              AIR #{req.targetAir}
+                            </div>
+                            <div className="text-[11px] text-slate-500 max-w-[180px] truncate" title={req.targetCollege}>
+                              {req.targetCollege}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                req.sourceReason === 'rate_limit_fallback'
+                                  ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                  : req.sourceReason === 'email_unconfirmed'
+                                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                    : 'bg-slate-100 text-slate-700 border-slate-200'
+                              }`}
+                            >
+                              <Clock className="w-2.5 h-2.5" />
+                              {sourceLabel}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                            {new Date(req.createdAt).toLocaleString(undefined, {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </td>
+                          <td className="px-5 py-3 text-right">
+                            {req.status === 'pending' ? (
+                              isRejecting ? (
+                                <div className="flex flex-col items-end gap-1.5">
+                                  <input
+                                    type="text"
+                                    value={rejectReasonDraft}
+                                    onChange={(e) => setRejectReasonDraft(e.target.value)}
+                                    placeholder="Decline reason (optional)"
+                                    maxLength={160}
+                                    className="w-52 px-2.5 py-1 text-[11px] border border-rose-200 rounded-lg bg-white outline-none focus:border-rose-400"
+                                  />
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      disabled={isProcessing}
+                                      onClick={() => void handleRejectRegistration(req, rejectReasonDraft)}
+                                      className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold disabled:opacity-50"
+                                    >
+                                      {isProcessing ? 'Declining...' : 'Confirm Decline'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setPendingRejectId(null);
+                                        setRejectReasonDraft('');
+                                      }}
+                                      className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-semibold"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="inline-flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={isProcessing}
+                                    onClick={() => void handleApproveRegistration(req)}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold disabled:opacity-50"
+                                  >
+                                    {isProcessing ? (
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <CheckCircle2 className="w-3.5 h-3.5" />
+                                    )}
+                                    Approve &amp; Activate
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isProcessing}
+                                    onClick={() => {
+                                      setPendingRejectId(req.id);
+                                      setRejectReasonDraft('');
+                                    }}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 bg-white text-rose-700 hover:bg-rose-50 text-xs font-semibold disabled:opacity-50"
+                                  >
+                                    <XCircle className="w-3.5 h-3.5" />
+                                    Decline
+                                  </button>
+                                </div>
+                              )
+                            ) : req.status === 'approved' ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <CheckCircle2 className="w-3 h-3" />
+                                Approved
+                              </span>
+                            ) : (
+                              <div className="inline-flex flex-col items-end">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                  <XCircle className="w-3 h-3" />
+                                  Declined
+                                </span>
+                                {req.rejectionReason && (
+                                  <span className="text-[10px] text-rose-600 mt-0.5 max-w-[180px] truncate" title={req.rejectionReason}>
+                                    {req.rejectionReason}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Section B: Existing User Roles & Access Moderation */}
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold text-slate-900">User Roles &amp; Access Moderation</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Assign roles or block any non-admin user. Blocked users are signed out and prevented
+                  from logging in until unblocked.
+                </p>
+              </div>
             {!isDemo && (
               <button
                 type="button"
@@ -2561,6 +2875,7 @@ export const ContentStudioView: React.FC = () => {
               </table>
             </div>
           )}
+          </div>
         </div>
       )}
 

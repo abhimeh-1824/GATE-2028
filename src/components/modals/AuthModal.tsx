@@ -12,10 +12,12 @@ import {
   AlertCircle,
   Sparkles,
   KeyRound,
+  ShieldCheck,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
 import { supabase } from '../../lib/supabase';
 import { getAppUrl } from '../../lib/appUrl';
+import { submitPendingRegistrationFallback } from '../../lib/supabaseService';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -44,6 +46,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     if (isOpen) {
       setErrorMessage(null);
       setSuccessNotice(null);
+      setShowApprovalRequestAction(false);
     }
   }, [isOpen]);
 
@@ -70,13 +73,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
+  const [showApprovalRequestAction, setShowApprovalRequestAction] = useState(false);
+  const [requestingApproval, setRequestingApproval] = useState(false);
 
   if (!isOpen) return null;
 
   const sanitizeError = (err: string) => {
     const lower = err.toLowerCase();
     if (lower.includes('rate limit') || lower.includes('429') || lower.includes('too many requests')) {
-      return 'Rate limit exceeded on authentication requests. Please wait a moment or click "Instant Demo Access" below.';
+      return 'Email authentication limit reached. You can submit your registration for direct Admin Approval (no email verification needed) or try again shortly.';
     }
     if (lower.includes('invalid login credentials') || lower.includes('invalid credentials')) {
       return 'Incorrect email or password. Please verify your details.';
@@ -94,6 +99,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoading(true);
     setErrorMessage(null);
     setSuccessNotice(null);
+    setShowApprovalRequestAction(false);
 
     const res = await login(email.trim(), password);
     setIsLoading(false);
@@ -106,6 +112,68 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }, 800);
     } else {
       setErrorMessage(sanitizeError(res.error || 'Invalid credentials or login failed.'));
+      if (res.needsEmailConfirmation) {
+        setShowApprovalRequestAction(true);
+      }
+    }
+  };
+
+  const handleRequestAdminApprovalForUnconfirmed = async () => {
+    if (!email.trim()) return;
+    setRequestingApproval(true);
+    const res = await submitPendingRegistrationFallback(
+      email.trim(),
+      password,
+      fullName.trim(),
+      targetAir,
+      targetCollege,
+      'email_unconfirmed'
+    );
+    setRequestingApproval(false);
+    if (res.success) {
+      setErrorMessage(null);
+      setShowApprovalRequestAction(false);
+      setSuccessNotice(
+        res.message ||
+          'Admin Approval requested! Once an Admin approves your account, you can sign in directly without email verification.'
+      );
+    } else {
+      setErrorMessage(res.error || 'Could not request Admin Approval.');
+    }
+  };
+
+  const handleDirectAdminApprovalRegister = async () => {
+    if (!email.trim() || !password || !fullName.trim()) {
+      setErrorMessage('Please enter your Full Name, Email Address, and Password (min 6 chars) first.');
+      return;
+    }
+    if (password.length < 6) {
+      setErrorMessage('Password must be at least 6 characters long.');
+      return;
+    }
+
+    setRequestingApproval(true);
+    setErrorMessage(null);
+    setSuccessNotice(null);
+
+    const res = await submitPendingRegistrationFallback(
+      email.trim(),
+      password,
+      fullName.trim(),
+      targetAir,
+      targetCollege,
+      'manual_request'
+    );
+    setRequestingApproval(false);
+
+    if (res.success) {
+      setActiveTab('login');
+      setPassword('');
+      setSuccessNotice(
+        'Registration submitted for Admin Approval! Once an Admin approves your account, you can sign in directly here without email verification.'
+      );
+    } else {
+      setErrorMessage(res.error || 'Could not submit registration request.');
     }
   };
 
@@ -121,6 +189,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoading(true);
     setErrorMessage(null);
     setSuccessNotice(null);
+    setShowApprovalRequestAction(false);
 
     const res = await register(
       email.trim(),
@@ -132,12 +201,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoading(false);
 
     if (res.success) {
+      if (res.pendingAdminApproval) {
+        setActiveTab('login');
+        setPassword('');
+        setSuccessNotice(
+          res.approvalMessage ||
+            'Email verification limit reached — your registration has been sent to Admin for approval! Once approved, sign in directly here without email verification.'
+        );
+        return;
+      }
+
       onRegistrationSuccess();
       setActiveTab('login');
       setPassword('');
       if (res.needsEmailConfirmation) {
         setSuccessNotice(
-          'Account created! Confirm your email from the link we sent, then sign in here.'
+          'Account created! Confirm your email from the link we sent — or if you did not receive it, an Admin can approve your account directly.'
         );
       } else {
         setSuccessNotice('Account created successfully! Please sign in with your email and password.');
@@ -250,9 +329,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Status Messages */}
         {errorMessage && (
-          <div className="mx-5 mt-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span className="leading-snug">{errorMessage}</span>
+          <div className="mx-5 mt-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs space-y-2">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className="leading-snug">{errorMessage}</span>
+            </div>
+            {showApprovalRequestAction && (
+              <button
+                type="button"
+                disabled={requestingApproval}
+                onClick={handleRequestAdminApprovalForUnconfirmed}
+                className="w-full py-1.5 px-3 rounded-md bg-indigo-700 hover:bg-indigo-800 text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>
+                  {requestingApproval
+                    ? 'Sending to Admin...'
+                    : 'Request Direct Admin Approval (Skip Email Verification)'}
+                </span>
+              </button>
+            )}
           </div>
         )}
 
@@ -455,10 +551,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             </div>
 
-            <div className="pt-2">
+            <div className="pt-2 space-y-2">
               <button
                 type="submit"
-                disabled={isLoading}
+                disabled={isLoading || requestingApproval}
                 className="w-full py-2.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-xs font-bold shadow-xs transition-colors disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
               >
                 {isLoading ? (
@@ -469,6 +565,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <span>Create My Study Workspace (0%)</span>
                   </>
                 )}
+              </button>
+
+              <button
+                type="button"
+                disabled={isLoading || requestingApproval}
+                onClick={handleDirectAdminApprovalRegister}
+                className="w-full py-2 border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100/80 text-indigo-800 rounded-lg text-[11px] font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-indigo-700" />
+                <span>
+                  {requestingApproval
+                    ? 'Submitting to Admin...'
+                    : 'Not getting emails? Register via Admin Approval'}
+                </span>
               </button>
             </div>
 

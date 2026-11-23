@@ -111,14 +111,25 @@ interface StudyContextType {
   dismissBlockedAccountNotice: () => void;
   chatGroupJoinError: string | null;
   ensureChatGroupMembership: () => Promise<void>;
-  login: (email: string, pass: string) => Promise<{ success: boolean; error?: string; needsEmailConfirmation?: boolean }>;
+  login: (email: string, pass: string) => Promise<{
+    success: boolean;
+    error?: string;
+    needsEmailConfirmation?: boolean;
+    pendingAdminApproval?: boolean;
+  }>;
   register: (
     email: string,
     pass: string,
     fullName: string,
     targetAir?: number,
     targetCollege?: string
-  ) => Promise<{ success: boolean; error?: string; needsEmailConfirmation?: boolean }>;
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    needsEmailConfirmation?: boolean;
+    pendingAdminApproval?: boolean;
+    approvalMessage?: string;
+  }>;
   logout: () => void;
   switchUser: (userId: string) => void;
   loginAsDemo: () => void;
@@ -780,7 +791,12 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       await switchUser(res.user.id);
       return { success: true, needsEmailConfirmation: res.needsEmailConfirmation };
     }
-    return { success: false, error: res.error || 'Authentication failed.' };
+    return {
+      success: false,
+      error: res.error || 'Authentication failed.',
+      needsEmailConfirmation: res.needsEmailConfirmation,
+      pendingAdminApproval: res.pendingAdminApproval,
+    };
   };
 
   const register = async (
@@ -793,6 +809,13 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     isRegisteringRef.current = true;
     try {
       const res = await signUpUser(email, pass, fullName, targetAir, targetCollege);
+      if (res.pendingAdminApproval) {
+        return {
+          success: true,
+          pendingAdminApproval: true,
+          approvalMessage: res.approvalMessage,
+        };
+      }
       if (res.user) {
         setAllUsers(getSavedAccounts());
         return { success: true, needsEmailConfirmation: res.needsEmailConfirmation };
