@@ -9,6 +9,7 @@ import {
   MessageCircle,
   RefreshCw,
   Send,
+  Shield,
   ShieldAlert,
   Trash2,
   Users,
@@ -18,6 +19,7 @@ import { StudyGroupChat } from './StudyGroupChat';
 import {
   ChatConversationSummary,
   ChatMessage,
+  adminDeleteChatMessage,
   deleteChatMessage,
   editChatMessage,
   getMyChatId,
@@ -42,7 +44,7 @@ const formatDate = (value: string) => new Date(value).toLocaleDateString();
 const formatTime = (value: string) => new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 export const ChatView: React.FC = () => {
-  const { currentUser, isDemo, setIsAuthModalOpen } = useStudy();
+  const { currentUser, isDemo, isAdmin, setIsAuthModalOpen } = useStudy();
   const userId = currentUser?.id;
   const isAuthenticated = Boolean(userId && !isDemo && !userId.startsWith('demo_'));
   const [myChatId, setMyChatId] = useState('');
@@ -60,6 +62,9 @@ export const ChatView: React.FC = () => {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+  const [confirmDeleteMsgId, setConfirmDeleteMsgId] = useState<string | null>(null);
+  const [deletingMsgId, setDeletingMsgId] = useState<string | null>(null);
+  const [confirmBlockPeer, setConfirmBlockPeer] = useState(false);
 
   const selectedConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === selectedConversationId) || null,
@@ -179,13 +184,12 @@ export const ChatView: React.FC = () => {
       setError('Sign in to manage blocked users.');
       return;
     }
-    const action = conversation.blockedByMe ? 'unblock' : 'block';
-    if (!window.confirm(`Are you sure you want to ${action} this chat ID?`)) return;
 
     setError('');
     setNotice('');
     try {
       await setChatUserBlocked(conversation.peerChatId, !conversation.blockedByMe);
+      setConfirmBlockPeer(false);
       await refreshConversations();
       setNotice(conversation.blockedByMe ? 'Chat ID unblocked.' : 'Chat ID blocked. New messages are disabled.');
     } catch (blockError) {
@@ -224,17 +228,27 @@ export const ChatView: React.FC = () => {
     }
   };
 
-  const handleDeleteMessage = async (messageId: string) => {
-    if (!window.confirm('Delete this message permanently for everyone? This cannot be undone.')) return;
-
+  const handleDeleteMessage = async (messageId: string, useAdminModeration: boolean) => {
+    setDeletingMsgId(messageId);
     setError('');
     setNotice('');
     try {
-      await deleteChatMessage(messageId);
+      if (useAdminModeration) {
+        await adminDeleteChatMessage(messageId);
+      } else {
+        await deleteChatMessage(messageId);
+      }
+      setConfirmDeleteMsgId(null);
       await refreshMessages();
-      setNotice('Message permanently deleted.');
+      setNotice(
+        useAdminModeration
+          ? 'Message removed by administrator.'
+          : 'Message permanently deleted.'
+      );
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : 'Could not delete message.');
+    } finally {
+      setDeletingMsgId(null);
     }
   };
 
@@ -270,9 +284,15 @@ export const ChatView: React.FC = () => {
     <section className="mx-auto max-w-6xl space-y-4">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <MessageCircle className="h-6 w-6 text-indigo-700" />
             <h1 className="text-2xl font-bold text-slate-900">Study chat</h1>
+            {isAdmin && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-[11px] font-bold text-rose-700">
+                <Shield className="h-3.5 w-3.5" />
+                Admin Moderation
+              </span>
+            )}
           </div>
           <p className="mt-1 text-sm text-slate-600">Connect using a chat ID. No names or email addresses are shown.</p>
         </div>
@@ -429,18 +449,37 @@ export const ChatView: React.FC = () => {
                     <div className="truncate font-mono text-xs font-semibold text-slate-900">{selectedConversation.peerChatId}</div>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void handleToggleBlock(selectedConversation)}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${
-                    selectedConversation.blockedByMe
-                      ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                      : 'border-rose-200 text-rose-700 hover:bg-rose-50'
-                  }`}
-                >
-                  {selectedConversation.blockedByMe ? <Check className="h-3.5 w-3.5" /> : <Ban className="h-3.5 w-3.5" />}
-                  {selectedConversation.blockedByMe ? 'Unblock' : 'Block'}
-                </button>
+                {confirmBlockPeer ? (
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => void handleToggleBlock(selectedConversation)}
+                      className="rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-rose-700"
+                    >
+                      Confirm {selectedConversation.blockedByMe ? 'Unblock' : 'Block'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmBlockPeer(false)}
+                      className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmBlockPeer(true)}
+                    className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${
+                      selectedConversation.blockedByMe
+                        ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                        : 'border-rose-200 text-rose-700 hover:bg-rose-50'
+                    }`}
+                  >
+                    {selectedConversation.blockedByMe ? <Check className="h-3.5 w-3.5" /> : <Ban className="h-3.5 w-3.5" />}
+                    {selectedConversation.blockedByMe ? 'Unblock' : 'Block'}
+                  </button>
+                )}
               </header>
 
               <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50/60 p-4">
@@ -450,6 +489,11 @@ export const ChatView: React.FC = () => {
                   </div>
                 ) : messages.map((message) => {
                   const isMine = message.senderIsMe;
+                  const canSelfModify =
+                    isMine && Date.now() - new Date(message.createdAt).getTime() < 60 * 60 * 1000;
+                  const useAdminDelete = isAdmin && !canSelfModify;
+                  const isConfirmingDel = confirmDeleteMsgId === message.id;
+
                   return (
                     <div key={message.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
                       <div className={`max-w-[85%] rounded-2xl px-3 py-2 shadow-sm ${
@@ -490,46 +534,81 @@ export const ChatView: React.FC = () => {
                         )}
                         <div className={`mt-1 flex items-center justify-between gap-4 text-[10px] ${isMine ? 'text-indigo-200' : 'text-slate-400'}`}>
                           <span>{formatTime(message.createdAt)}{message.editedAt ? ' · edited' : ''}</span>
-                          {isMine && !editingMessageId && Date.now() - new Date(message.createdAt).getTime() < 60 * 60 * 1000 ? (
+                          {!editingMessageId && (
                             <span className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingMessageId(message.id);
-                                  setEditDraft(message.body);
-                                }}
-                                className="flex items-center gap-1 hover:underline"
-                              >
-                                <Pencil className="h-3 w-3" />Edit
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void handleDeleteMessage(message.id)}
-                                className="flex items-center gap-1 hover:underline"
-                              >
-                                <Trash2 className="h-3 w-3" />Delete
-                              </button>
-                            </span>
-                          ) : !isMine && (
-                            reportedMessageIds.has(message.id) ? (
-                              <span className="flex items-center gap-1"><Check className="h-3 w-3" />Reported</span>
-                            ) : (
-                              <details className="relative">
-                                <summary className="cursor-pointer list-none hover:underline">Report</summary>
-                                <div className="absolute right-0 z-10 mt-1 w-48 rounded-lg border border-slate-200 bg-white p-1 text-xs text-slate-700 shadow-lg">
-                                  {REPORT_REASONS.map((reason) => (
+                              {canSelfModify && !isConfirmingDel && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingMessageId(message.id);
+                                    setEditDraft(message.body);
+                                  }}
+                                  className="flex items-center gap-1 hover:underline"
+                                >
+                                  <Pencil className="h-3 w-3" />Edit
+                                </button>
+                              )}
+
+                              {(canSelfModify || isAdmin) && (
+                                isConfirmingDel ? (
+                                  <span className="inline-flex items-center gap-1.5">
                                     <button
-                                      key={reason.value}
                                       type="button"
-                                      onClick={() => void handleReport(message.id, reason.value)}
-                                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-rose-50 hover:text-rose-700"
+                                      disabled={deletingMsgId === message.id}
+                                      onClick={() => void handleDeleteMessage(message.id, useAdminDelete)}
+                                      className="rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white hover:bg-rose-700 disabled:opacity-50"
                                     >
-                                      {reason.label}
+                                      {deletingMsgId === message.id ? 'Deleting…' : 'Confirm'}
                                     </button>
-                                  ))}
-                                </div>
-                              </details>
-                            )
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteMsgId(null)}
+                                      className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                                        isMine
+                                          ? 'bg-white/20 text-white hover:bg-white/30'
+                                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                      }`}
+                                    >
+                                      Cancel
+                                    </button>
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteMsgId(message.id)}
+                                    className={`flex items-center gap-1 hover:underline ${
+                                      useAdminDelete && !isMine ? 'text-rose-600 font-semibold' : ''
+                                    }`}
+                                    title={useAdminDelete ? 'Admin security delete' : 'Delete message'}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                    {useAdminDelete ? 'Admin Delete' : 'Delete'}
+                                  </button>
+                                )
+                              )}
+
+                              {!isMine && !isConfirmingDel && (
+                                reportedMessageIds.has(message.id) ? (
+                                  <span className="flex items-center gap-1"><Check className="h-3 w-3" />Reported</span>
+                                ) : (
+                                  <details className="relative">
+                                    <summary className="cursor-pointer list-none hover:underline">Report</summary>
+                                    <div className="absolute right-0 z-10 mt-1 w-48 rounded-lg border border-slate-200 bg-white p-1 text-xs text-slate-700 shadow-lg">
+                                      {REPORT_REASONS.map((reason) => (
+                                        <button
+                                          key={reason.value}
+                                          type="button"
+                                          onClick={() => void handleReport(message.id, reason.value)}
+                                          className="block w-full rounded px-2 py-1.5 text-left hover:bg-rose-50 hover:text-rose-700"
+                                        >
+                                          {reason.label}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </details>
+                                )
+                              )}
+                            </span>
                           )}
                         </div>
                       </div>

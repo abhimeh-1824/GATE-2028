@@ -89,6 +89,21 @@ export async function deleteStudyGroupMessage(messageId: string): Promise<void> 
   if (error) throw chatRpcError('Could not delete group message', error);
 }
 
+export async function adminDeleteStudyGroupMessage(messageId: string): Promise<void> {
+  const { error } = await supabase.rpc('admin_delete_group_message', {
+    p_message_id: messageId,
+  });
+
+  if (error) {
+    if (error.code === 'PGRST202') {
+      throw new Error(
+        'Admin chat moderation function is not installed yet. Run supabase/migrations/20261123_admin_security_controls.sql in Supabase SQL Editor.'
+      );
+    }
+    throw chatRpcError('Could not delete group message as admin', error);
+  }
+}
+
 export async function loadChatConversations(): Promise<ChatConversationSummary[]> {
   const { data, error } = await supabase.rpc('chat_list_conversations');
 
@@ -155,6 +170,21 @@ export async function deleteChatMessage(messageId: string): Promise<void> {
   });
 
   if (error) throw chatRpcError('Could not delete message', error);
+}
+
+export async function adminDeleteChatMessage(messageId: string): Promise<void> {
+  const { error } = await supabase.rpc('admin_delete_direct_message', {
+    p_message_id: messageId,
+  });
+
+  if (error) {
+    if (error.code === 'PGRST202') {
+      throw new Error(
+        'Admin chat moderation function is not installed yet. Run supabase/migrations/20261123_admin_security_controls.sql in Supabase SQL Editor.'
+      );
+    }
+    throw chatRpcError('Could not delete message as admin', error);
+  }
 }
 
 export async function setChatUserBlocked(chatId: string, blocked: boolean): Promise<void> {

@@ -165,6 +165,9 @@ export async function signInUser(email: string, password: string): Promise<AuthR
     let targetCollege = sbUser.user_metadata?.target_college || 'IISc Bangalore (M.Tech AI)';
     let role: UserRole = 'student';
 
+    let isBlocked = false;
+    let blockedReason: string | null = null;
+
     try {
       const { data: profile } = await supabase
         .from('profiles')
@@ -177,8 +180,27 @@ export async function signInUser(email: string, password: string): Promise<AuthR
       if (profile?.role === 'admin' || profile?.role === 'content_manager' || profile?.role === 'student') {
         role = profile.role;
       }
+      if (profile?.is_blocked === true) {
+        isBlocked = true;
+        blockedReason = typeof profile.blocked_reason === 'string' ? profile.blocked_reason : null;
+      }
     } catch (e) {
       console.warn('Could not fetch remote profile:', e);
+    }
+
+    if (isBlocked) {
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // ignore signOut failure
+      }
+      setActiveUserId(null);
+      return {
+        user: null,
+        error: blockedReason
+          ? `Your account has been blocked by an administrator: ${blockedReason}`
+          : 'Your account has been blocked by an administrator and cannot sign in.',
+      };
     }
 
     const authUser: AuthUser = {
@@ -695,24 +717,77 @@ export async function fetchUserRole(userId: string): Promise<UserRole> {
 }
 
 /**
- * Admin: Fetch all user profiles for role delegation.
+ * Check whether the given user is currently blocked by an administrator.
+ */
+export async function fetchUserBlockStatus(
+  userId: string
+): Promise<{ isBlocked: boolean; reason?: string | null }> {
+  if (!UUID_PATTERN.test(userId)) return { isBlocked: false };
+  try {
+    const { data: rpcData, error: rpcError } = await supabase.rpc('check_my_block_status');
+    if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
+      return {
+        isBlocked: Boolean(rpcData[0]?.is_blocked),
+        reason: rpcData[0]?.blocked_reason ?? null,
+      };
+    }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('is_blocked, blocked_reason')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) {
+      return { isBlocked: false };
+    }
+    return {
+      isBlocked: Boolean(data?.is_blocked),
+      reason: typeof data?.blocked_reason === 'string' ? data.blocked_reason : null,
+    };
+  } catch {
+    return { isBlocked: false };
+  }
+}
+
+/**
+ * Admin: Fetch all user profiles for role delegation and user moderation.
  */
 export async function fetchAllManagedProfiles(): Promise<{
   profiles: ManagedUserProfile[];
   error?: string;
 }> {
   try {
-    const { data, error } = await supabase
+    const primary = await supabase
       .from('profiles')
-      .select('id, full_name, role, created_at')
+      .select('id, full_name, role, created_at, is_blocked, blocked_at, blocked_reason')
       .order('created_at', { ascending: true });
-    if (error) return { profiles: [], error: error.message };
+
+    let rows: any[] | null = primary.data;
+    let queryError = primary.error;
+
+    // Graceful fallback if block columns migration has not yet been applied
+    if (
+      queryError &&
+      (queryError.code === '42703' || (queryError.message || '').toLowerCase().includes('is_blocked'))
+    ) {
+      const fallback = await supabase
+        .from('profiles')
+        .select('id, full_name, role, created_at')
+        .order('created_at', { ascending: true });
+      rows = fallback.data;
+      queryError = fallback.error;
+    }
+
+    if (queryError) return { profiles: [], error: queryError.message };
     return {
-      profiles: (data || []).map((row) => ({
+      profiles: (rows || []).map((row) => ({
         id: row.id,
         fullName: row.full_name || 'Aspirant',
         role: (row.role === 'admin' || row.role === 'content_manager' ? row.role : 'student') as UserRole,
         createdAt: row.created_at || new Date().toISOString(),
+        isBlocked: Boolean(row.is_blocked),
+        blockedAt: row.blocked_at ?? null,
+        blockedReason: row.blocked_reason ?? null,
       })),
     };
   } catch (err: any) {
@@ -736,6 +811,37 @@ export async function updateManagedUserRole(
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err?.message || 'Failed to update user role.' };
+  }
+}
+
+/**
+ * Admin: Block or unblock a user account so blocked users cannot sign in.
+ */
+export async function setManagedUserBlocked(
+  targetUserId: string,
+  blocked: boolean,
+  reason?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const cleanReason = reason?.trim() || null;
+    const { error } = await supabase.rpc('admin_set_user_blocked', {
+      p_target_user_id: targetUserId,
+      p_blocked: blocked,
+      p_reason: cleanReason,
+    });
+    if (error) {
+      if (error.code === 'PGRST202') {
+        return {
+          success: false,
+          error:
+            'Run the latest SQL migration (supabase/migrations/20261123_admin_security_controls.sql) in Supabase SQL Editor to enable user blocking.',
+        };
+      }
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to update user block status.' };
   }
 }
 

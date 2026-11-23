@@ -18,6 +18,7 @@ export const DEFAULT_LINKED_APPLET_URL =
 
 let inMemoryLinkedConfig: LinkedAppletConfig | null = null;
 let inMemorySnapshot: AppletSyncPayload | null = null;
+let serverSyncEndpointUnavailable = false;
 const BROADCAST_CHANNEL_NAME = `ais_sync_channel_${DEFAULT_LINKED_APPLET_ID}`;
 
 // Initialize BroadcastChannel if available in browser environment
@@ -167,7 +168,8 @@ export function validateAppletSyncPayload(raw: unknown): { valid: boolean; error
  * 4. LocalStorage snapshot
  */
 export async function pushSyncToLinkedApplet(
-  payload: AppletSyncPayload
+  payload: AppletSyncPayload,
+  options?: { includeServerApi?: boolean }
 ): Promise<{ success: boolean; message: string; timestamp: string }> {
   const timestamp = new Date().toISOString();
   let serverSynced = false;
@@ -193,33 +195,36 @@ export async function pushSyncToLinkedApplet(
   // 2. Keep an in-memory snapshot for the current session.
   inMemorySnapshot = payload;
 
-  // 3. Post to Node/Express server endpoint (only if verified authenticated session)
+  // 3. Optional Express server endpoint (only on explicit manual sync & when endpoint exists)
   if (!isDemo && payload.user) {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        const res = await fetch(`/api/sync/${DEFAULT_LINKED_APPLET_ID}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify(payload),
-        });
-        if (res.ok) {
-          serverSynced = true;
-        } else {
-          const errJson = await res.json().catch(() => ({}));
-          failureReasons.push(`Server API error (${res.status}): ${errJson.error || res.statusText}`);
+    if (options?.includeServerApi && !serverSyncEndpointUnavailable) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          const res = await fetch(`/api/sync/${DEFAULT_LINKED_APPLET_ID}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify(payload),
+          });
+          if (res.ok) {
+            serverSynced = true;
+          } else if (res.status === 404 || res.status === 405) {
+            // Static deployments (e.g. Vercel SPA) do not expose /api/sync; rely on Supabase directly
+            serverSyncEndpointUnavailable = true;
+          } else {
+            const errJson = await res.json().catch(() => ({}));
+            failureReasons.push(`Server API error (${res.status}): ${errJson.error || res.statusText}`);
+          }
         }
-      } else {
-        failureReasons.push('No active Supabase session token available for server sync.');
+      } catch (err: any) {
+        failureReasons.push(`Network server error: ${err?.message || 'Failed to reach sync endpoint'}`);
       }
-    } catch (err: any) {
-      failureReasons.push(`Network server error: ${err?.message || 'Failed to reach sync endpoint'}`);
     }
 
-    // 4. Also sync to shared Supabase database
+    // 4. Sync directly to shared Supabase database (primary persistence)
     if (payload.user) {
       try {
         const sbRes = await syncUserProfileAndProgressToDatabase(
@@ -295,34 +300,38 @@ export async function pullSyncFromLinkedApplet(): Promise<{
   source: 'server' | 'supabase' | 'local' | 'none';
   message: string;
 }> {
-  // 1. Try server endpoint if session is active
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token) {
-      const res = await fetch(`/api/sync/${DEFAULT_LINKED_APPLET_ID}`, {
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (json && json.payload) {
-          const validated = validateAppletSyncPayload(json.payload);
-          if (validated.valid && validated.data) {
-            return {
-              success: true,
-              payload: validated.data,
-              source: 'server',
-              message: 'Received latest verified telemetry from Cloud Server.',
-            };
-          } else {
-            console.warn('Rejected invalid server sync payload schema:', validated.error);
+  // 1. Try optional server endpoint if session is active and endpoint is available
+  if (!serverSyncEndpointUnavailable) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        const res = await fetch(`/api/sync/${DEFAULT_LINKED_APPLET_ID}`, {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.payload) {
+            const validated = validateAppletSyncPayload(json.payload);
+            if (validated.valid && validated.data) {
+              return {
+                success: true,
+                payload: validated.data,
+                source: 'server',
+                message: 'Received latest verified telemetry from Cloud Server.',
+              };
+            } else {
+              console.warn('Rejected invalid server sync payload schema:', validated.error);
+            }
           }
+        } else if (res.status === 404 || res.status === 405) {
+          serverSyncEndpointUnavailable = true;
         }
       }
+    } catch (err) {
+      console.warn('Server pull note:', err);
     }
-  } catch (err) {
-    console.warn('Server pull note:', err);
   }
 
   // 2. Try the in-memory snapshot for the current session.

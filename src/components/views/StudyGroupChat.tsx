@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Check, LockKeyhole, Pencil, RefreshCw, Send, Trash2, Users } from 'lucide-react';
+import { Check, LockKeyhole, Pencil, RefreshCw, Send, Shield, Trash2, Users } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
 import {
   ChatGroupMessage,
   ChatReportReason,
+  adminDeleteStudyGroupMessage,
   deleteStudyGroupMessage,
   editStudyGroupMessage,
   ensureChatGroupMembership,
@@ -23,7 +24,7 @@ const REPORT_REASONS: { value: ChatReportReason; label: string }[] = [
 const formatTime = (value: string) => new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 export const StudyGroupChat: React.FC = () => {
-  const { chatGroupJoinError, ensureChatGroupMembership: ensureMembership } = useStudy();
+  const { chatGroupJoinError, ensureChatGroupMembership: ensureMembership, isAdmin } = useStudy();
   const [messages, setMessages] = useState<ChatGroupMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
@@ -116,15 +117,21 @@ export const StudyGroupChat: React.FC = () => {
     }
   };
 
-  const handleDelete = async (messageId: string): Promise<boolean> => {
-    if (!window.confirm('Delete this message permanently for everyone? This cannot be undone.')) return false;
-
+  const handleDelete = async (messageId: string, useAdminModeration: boolean): Promise<boolean> => {
     setError('');
     setNotice('');
     try {
-      await deleteStudyGroupMessage(messageId);
+      if (useAdminModeration) {
+        await adminDeleteStudyGroupMessage(messageId);
+      } else {
+        await deleteStudyGroupMessage(messageId);
+      }
       setMessages(await loadStudyGroupMessages());
-      setNotice('Message permanently deleted.');
+      setNotice(
+        useAdminModeration
+          ? 'Message removed by administrator.'
+          : 'Message permanently deleted.'
+      );
       return true;
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : 'Could not delete group message.');
@@ -146,8 +153,20 @@ export const StudyGroupChat: React.FC = () => {
         <div className="flex items-center gap-2">
           <Users className="h-5 w-5 text-indigo-700" />
           <div>
-            <h2 className="text-sm font-bold text-slate-900">GATE Study Group</h2>
-            <p className="text-[11px] text-slate-500">Everyone joins automatically · Edit/delete your messages within 1 hour</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-sm font-bold text-slate-900">GATE Study Group</h2>
+              {isAdmin && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+                  <Shield className="h-3 w-3" />
+                  Admin Moderation Active
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-500">
+              {isAdmin
+                ? 'Admin mode: You can permanently delete any message for security & moderation.'
+                : 'Everyone joins automatically · Edit/delete your messages within 1 hour'}
+            </p>
           </div>
         </div>
         <button
@@ -186,6 +205,7 @@ export const StudyGroupChat: React.FC = () => {
           <GroupMessage
             key={message.id}
             message={message}
+            isAdmin={isAdmin}
             reported={reportedMessageIds.has(message.id)}
             onReport={handleReport}
             onEdit={handleEdit}
@@ -229,21 +249,35 @@ export const StudyGroupChat: React.FC = () => {
 
 const GroupMessage: React.FC<{
   message: ChatGroupMessage;
+  isAdmin: boolean;
   reported: boolean;
   onReport: (messageId: string, reason: ChatReportReason) => void;
   onEdit: (messageId: string, body: string) => Promise<boolean>;
-  onDelete: (messageId: string) => Promise<boolean>;
-}> = ({ message, reported, onReport, onEdit, onDelete }) => {
+  onDelete: (messageId: string, useAdminModeration: boolean) => Promise<boolean>;
+}> = ({ message, isAdmin, reported, onReport, onEdit, onDelete }) => {
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(message.body);
   const [saving, setSaving] = useState(false);
-  const canModify = message.senderIsMe && Date.now() - new Date(message.createdAt).getTime() < 60 * 60 * 1000;
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const canSelfModify =
+    message.senderIsMe && Date.now() - new Date(message.createdAt).getTime() < 60 * 60 * 1000;
+  const useAdminDelete = isAdmin && !canSelfModify;
 
   const saveEdit = async () => {
     if (!editDraft.trim() || saving) return;
     setSaving(true);
     if (await onEdit(message.id, editDraft.trim())) setEditing(false);
     setSaving(false);
+  };
+
+  const confirmDelete = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    await onDelete(message.id, useAdminDelete);
+    setDeleting(false);
+    setConfirmingDelete(false);
   };
 
   return (
@@ -291,35 +325,74 @@ const GroupMessage: React.FC<{
           message.senderIsMe ? 'text-indigo-200' : 'text-slate-400'
         }`}>
           <span>{formatTime(message.createdAt)}{message.editedAt ? ' · edited' : ''}</span>
-          {canModify && !editing ? (
+          {!editing && (
             <span className="flex items-center gap-2">
-              <button type="button" onClick={() => setEditing(true)} className="flex items-center gap-1 hover:underline">
-                <Pencil className="h-3 w-3" />Edit
-              </button>
-              <button type="button" onClick={() => void onDelete(message.id)} className="flex items-center gap-1 hover:underline">
-                <Trash2 className="h-3 w-3" />Delete
-              </button>
-            </span>
-          ) : !message.senderIsMe && (
-            reported ? (
-              <span className="flex items-center gap-1"><Check className="h-3 w-3" />Reported</span>
-            ) : (
-              <details className="relative">
-                <summary className="cursor-pointer list-none hover:underline">Report</summary>
-                <div className="absolute right-0 z-10 mt-1 w-48 rounded-lg border border-slate-200 bg-white p-1 text-xs text-slate-700 shadow-lg">
-                  {REPORT_REASONS.map((reason) => (
+              {canSelfModify && !confirmingDelete && (
+                <button type="button" onClick={() => setEditing(true)} className="flex items-center gap-1 hover:underline">
+                  <Pencil className="h-3 w-3" />Edit
+                </button>
+              )}
+
+              {(canSelfModify || isAdmin) && (
+                confirmingDelete ? (
+                  <span className="inline-flex items-center gap-1.5">
                     <button
-                      key={reason.value}
                       type="button"
-                      onClick={() => onReport(message.id, reason.value)}
-                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-rose-50 hover:text-rose-700"
+                      disabled={deleting}
+                      onClick={() => void confirmDelete()}
+                      className="rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white hover:bg-rose-700 disabled:opacity-50"
                     >
-                      {reason.label}
+                      {deleting ? 'Deleting…' : 'Confirm'}
                     </button>
-                  ))}
-                </div>
-              </details>
-            )
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingDelete(false)}
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                        message.senderIsMe
+                          ? 'bg-white/20 text-white hover:bg-white/30'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingDelete(true)}
+                    className={`flex items-center gap-1 hover:underline ${
+                      useAdminDelete && !message.senderIsMe ? 'text-rose-600 font-semibold' : ''
+                    }`}
+                    title={useAdminDelete ? 'Admin security delete' : 'Delete message'}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    {useAdminDelete ? 'Admin Delete' : 'Delete'}
+                  </button>
+                )
+              )}
+
+              {!message.senderIsMe && !confirmingDelete && (
+                reported ? (
+                  <span className="flex items-center gap-1"><Check className="h-3 w-3" />Reported</span>
+                ) : (
+                  <details className="relative">
+                    <summary className="cursor-pointer list-none hover:underline">Report</summary>
+                    <div className="absolute right-0 z-10 mt-1 w-48 rounded-lg border border-slate-200 bg-white p-1 text-xs text-slate-700 shadow-lg">
+                      {REPORT_REASONS.map((reason) => (
+                        <button
+                          key={reason.value}
+                          type="button"
+                          onClick={() => onReport(message.id, reason.value)}
+                          className="block w-full rounded px-2 py-1.5 text-left hover:bg-rose-50 hover:text-rose-700"
+                        >
+                          {reason.label}
+                        </button>
+                      ))}
+                    </div>
+                  </details>
+                )
+              )}
+            </span>
           )}
         </div>
       </div>
