@@ -15,9 +15,10 @@ import {
 import { useStudy } from '../../context/StudyContext';
 import { MockTest } from '../../types';
 import { RecordMockModal } from '../modals/RecordMockModal';
+import { TestPerformanceTrendsWidget } from '../widgets/TestPerformanceTrendsWidget';
 
 export const AnalyticsView: React.FC = () => {
-  const { subjects, tasks, mockTests, totalHoursStudied, settings, deleteMockTest } = useStudy();
+  const { subjects, tasks, mockTests, testAttempts, totalHoursStudied, settings, deleteMockTest } = useStudy();
 
   const [timeframe, setTimeframe] = useState<'weekly' | 'monthly'>('weekly');
   const [isRecordMockOpen, setIsRecordMockOpen] = useState(false);
@@ -71,13 +72,16 @@ export const AnalyticsView: React.FC = () => {
     };
   });
 
-  // Dates with activity from tasks or mock tests
+  // Dates with activity from tasks, mock tests, or level test attempts
   const activeDateSet = new Set<string>();
   tasks.forEach((t) => {
     if (t.completed && t.date) activeDateSet.add(t.date);
   });
   mockTests.forEach((m) => {
     if (m.date) activeDateSet.add(m.date);
+  });
+  testAttempts.forEach((a) => {
+    if (a.completedAt) activeDateSet.add(a.completedAt.split('T')[0]);
   });
 
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -124,6 +128,9 @@ export const AnalyticsView: React.FC = () => {
           </button>
         </div>
       </section>
+
+      {/* Subject / Topic / Subtopic Test Progression & Score Trend Analysis */}
+      <TestPerformanceTrendsWidget mode="full" />
 
       {/* Top 2 Charts: Weekly Volume & Subject Accuracy */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-6">

@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Clock } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
 import { NeedsRevisionWidget } from '../widgets/NeedsRevisionWidget';
+import { TestPerformanceTrendsWidget } from '../widgets/TestPerformanceTrendsWidget';
+import { analyzeTestPerformance } from '../../utils/testPerformanceAnalysis';
 
 interface DashboardViewProps {
   onOpenFormulaVault: () => void;
@@ -16,6 +18,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const {
     subjects,
     mockTests,
+    levelTests,
+    testAttempts,
     settings,
     totalTopics,
     completedTopics,
@@ -29,6 +33,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   } = useStudy();
 
   const latestMock = mockTests[mockTests.length - 1];
+  const testAnalysis = useMemo(
+    () => analyzeTestPerformance(testAttempts, levelTests, subjects),
+    [testAttempts, levelTests, subjects]
+  );
+  const latestTestAttempt = testAnalysis.latestAttempt;
 
   // Find topics due for revision
   const revisionDueTopics = subjects
@@ -161,12 +170,46 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Metric 4: Latest CBT Simulation */}
+        {/* Metric 4: Latest Test Performance */}
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs flex flex-col justify-between">
           <div>
-            <div className="text-xs font-semibold text-slate-500 mb-1">Latest Mock CBT</div>
+            <div className="text-xs font-semibold text-slate-500 mb-1">
+              {latestTestAttempt ? 'Latest Test Score' : 'Latest Mock CBT'}
+            </div>
             <div className="flex items-baseline gap-2">
-              {latestMock ? (
+              {latestTestAttempt ? (
+                <>
+                  <span
+                    className={`text-2xl font-extrabold font-mono ${
+                      latestTestAttempt.percentage >= 75
+                        ? 'text-emerald-600'
+                        : latestTestAttempt.percentage >= 60
+                        ? 'text-indigo-700'
+                        : 'text-rose-600'
+                    }`}
+                  >
+                    {latestTestAttempt.percentage}%
+                  </span>
+                  {testAnalysis.overallLatestDelta !== null ? (
+                    <span
+                      className={`text-xs font-mono font-bold ${
+                        testAnalysis.overallLatestDelta > 0
+                          ? 'text-emerald-600'
+                          : testAnalysis.overallLatestDelta < 0
+                          ? 'text-rose-600'
+                          : 'text-slate-500'
+                      }`}
+                    >
+                      {testAnalysis.overallLatestDelta > 0 ? '+' : ''}
+                      {testAnalysis.overallLatestDelta}% vs prev
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-400 font-mono">
+                      {latestTestAttempt.score}/{latestTestAttempt.totalQuestions} Qs
+                    </span>
+                  )}
+                </>
+              ) : latestMock ? (
                 <>
                   <span className="text-2xl font-extrabold text-indigo-700 font-mono">
                     {latestMock.score.toFixed(1)}
@@ -178,27 +221,46 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <span className="text-2xl font-extrabold text-slate-400 font-mono">
                     —
                   </span>
-                  <span className="text-xs text-slate-400 font-mono">/ 100</span>
+                  <span className="text-xs text-slate-400 font-mono">0 tests</span>
                 </>
               )}
             </div>
           </div>
 
-          <div className="mt-4 pt-2 border-t border-slate-100 text-[11px] text-slate-500 flex items-center justify-between">
-            <span>{latestMock ? 'Predicted Percentile' : 'Status'}</span>
-            <span className={`font-mono font-bold ${latestMock ? 'text-emerald-600' : 'text-slate-400'}`}>
-              {latestMock ? `${latestMock.percentile}% (AIR < 10)` : 'No tests recorded yet'}
-            </span>
+          <div className="mt-4 pt-2 border-t border-slate-100 text-[11px] text-slate-500 flex items-center justify-between gap-2">
+            {latestTestAttempt ? (
+              <>
+                <span className="truncate" title={latestTestAttempt.testTitle}>
+                  {latestTestAttempt.testTitle}
+                </span>
+                <span className="font-mono font-semibold text-indigo-700 shrink-0">
+                  {testAnalysis.totalAttempts} {testAnalysis.totalAttempts === 1 ? 'attempt' : 'attempts'}
+                </span>
+              </>
+            ) : (
+              <>
+                <span>{latestMock ? 'Predicted Percentile' : 'Status'}</span>
+                <span className={`font-mono font-bold ${latestMock ? 'text-emerald-600' : 'text-slate-400'}`}>
+                  {latestMock ? `${latestMock.percentile}% (AIR < 10)` : 'No tests attempted yet'}
+                </span>
+              </>
+            )}
           </div>
         </div>
       </section>
 
-      {/* Supabase-powered Needs Revision Targeted Study Widget */}
+      {/* Test-Driven Needs Revision Targeted Study Widget */}
       <section>
         <NeedsRevisionWidget
           onSelectSubject={onSelectSubject}
         />
       </section>
+
+      {/* Subject / Topic / Subtopic Score Progression & Trend Analysis */}
+      <TestPerformanceTrendsWidget
+        mode="compact"
+        onSelectSubject={onSelectSubject}
+      />
 
       {/* Spaced Repetition Due Alert */}
       <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-3">
