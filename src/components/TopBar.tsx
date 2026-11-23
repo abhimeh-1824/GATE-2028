@@ -1,26 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  Timer,
-  Play,
-  Pause,
-  RotateCcw,
-  Search,
-  Plus,
-  Compass,
   Download,
   HelpCircle,
   Settings,
   LogOut,
   ChevronDown,
   User,
-  Sparkles,
   Menu,
+  Coins,
+  Trophy,
+  X,
 } from 'lucide-react';
 import { useStudy } from '../context/StudyContext';
 
 interface TopBarProps {
-  onOpenOmnibox: () => void;
-  onOpenAddTask: () => void;
   onOpenBackup: () => void;
   onOpenAuthModal?: () => void;
   onOpenTour?: () => void;
@@ -37,8 +30,6 @@ const ACADEMIC_MOTTOS = [
 ];
 
 export const TopBar: React.FC<TopBarProps> = ({
-  onOpenOmnibox,
-  onOpenAddTask,
   onOpenBackup,
   onOpenAuthModal,
   onOpenTour,
@@ -48,13 +39,12 @@ export const TopBar: React.FC<TopBarProps> = ({
   const {
     activeView,
     setActiveView,
-    timerState,
-    startTimer,
-    pauseTimer,
-    resetTimer,
     currentUser,
     logout,
     settings,
+    coinBalance,
+    lastCoinToast,
+    dismissCoinToast,
   } = useStudy();
 
   const [mottoIndex, setMottoIndex] = useState(0);
@@ -84,13 +74,6 @@ export const TopBar: React.FC<TopBarProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Format timer seconds into mm:ss
-  const formatTimerTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
   const userInitials = currentUser?.fullName
     ? currentUser.fullName
         .split(' ')
@@ -101,7 +84,7 @@ export const TopBar: React.FC<TopBarProps> = ({
     : 'DA';
 
   return (
-    <header className="h-14 border-b border-slate-200 bg-white/95 backdrop-blur-xs px-3 sm:px-6 flex items-center justify-between gap-3 sticky top-0 z-30 shadow-2xs">
+    <header className="h-14 border-b border-slate-200 bg-white/95 backdrop-blur-xs px-3 sm:px-6 flex items-center justify-between gap-3 sticky top-0 z-30 shadow-2xs relative">
       {/* Left: Mobile Drawer Trigger + Today's Date & Academic Motto */}
       <div className="flex items-center gap-2 sm:gap-3 min-w-0">
         {onToggleMobileMenu && (
@@ -130,62 +113,27 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
       </div>
 
-      {/* Right Controls: Focus Timer, Search, New Task & Unified Profile Menu */}
+      {/* Right Controls: Coin Balance Pill & Unified Profile Menu */}
       <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
-        {/* Focus Timer Widget */}
-        <div className="flex items-center gap-1 sm:gap-1.5 px-2 py-1 rounded-lg border border-slate-200 bg-slate-50/80 shadow-2xs">
-          <Timer className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-          <span className="font-mono text-xs font-bold text-slate-800 w-11 text-center">
-            {formatTimerTime(timerState.timeLeft)}
+        {/* Live Coin Balance Button -> Opens Competitive Leaderboard */}
+        <button
+          type="button"
+          onClick={() => setActiveView('Leaderboard')}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors shadow-2xs ${
+            activeView === 'Leaderboard'
+              ? 'bg-amber-100 border-amber-300 text-amber-900'
+              : 'bg-amber-50/80 border-amber-200 text-amber-900 hover:bg-amber-100/80'
+          }`}
+          title="View Coin Balance & Competitive Leaderboard"
+        >
+          <Coins className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+          <span className="font-mono tabular-nums font-bold">
+            {coinBalance.toLocaleString()}
           </span>
-          <div className="flex items-center gap-0.5 border-l border-slate-200 pl-1">
-            {timerState.isRunning ? (
-              <button
-                onClick={pauseTimer}
-                title="Pause Focus Session"
-                className="p-1 rounded text-slate-600 hover:text-amber-600 hover:bg-slate-200 transition-colors"
-              >
-                <Pause className="w-3 h-3" />
-              </button>
-            ) : (
-              <button
-                onClick={startTimer}
-                title="Start Focus Session"
-                className="p-1 rounded text-slate-600 hover:text-indigo-600 hover:bg-slate-200 transition-colors"
-              >
-                <Play className="w-3 h-3" />
-              </button>
-            )}
-            <button
-              onClick={resetTimer}
-              title="Reset Timer"
-              className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition-colors"
-            >
-              <RotateCcw className="w-2.5 h-2.5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Global Omnibox Search (⌘K) */}
-        <button
-          onClick={onOpenOmnibox}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-800 text-xs transition-colors shadow-2xs"
-          title="Search syllabus, formulas, and proofs (Cmd+K)"
-        >
-          <Search className="w-3.5 h-3.5 text-slate-400" />
-          <span className="hidden sm:inline text-slate-500">Search</span>
-          <kbd className="hidden md:inline-block px-1 py-0.5 text-[9px] font-mono bg-slate-100 border border-slate-200 rounded text-slate-500">
-            ⌘K
-          </kbd>
-        </button>
-
-        {/* Quick Add Task */}
-        <button
-          onClick={onOpenAddTask}
-          className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-semibold shadow-xs transition-colors"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">New Task</span>
+          <span className="hidden sm:inline text-[11px] font-semibold text-amber-800">
+            Coins
+          </span>
+          <Trophy className="w-3 h-3 text-amber-600/80 hidden sm:inline shrink-0" />
         </button>
 
         {/* Unified Profile & Utility Dropdown Menu */}
@@ -306,6 +254,29 @@ export const TopBar: React.FC<TopBarProps> = ({
           )}
         </div>
       </div>
+
+      {/* Floating Coin Earned Notification Toast */}
+      {lastCoinToast && (
+        <div className="fixed top-16 right-4 z-50 flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-amber-50 border border-amber-300 shadow-lg text-amber-950 animate-in fade-in slide-in-from-top-2 duration-200 max-w-xs">
+          <div className="w-7 h-7 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0">
+            <Coins className="w-4 h-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-bold font-mono text-amber-900">
+              +{lastCoinToast.amount} Coins Earned!
+            </div>
+            <div className="text-[11px] text-amber-800 truncate">{lastCoinToast.reason}</div>
+          </div>
+          <button
+            type="button"
+            onClick={dismissCoinToast}
+            className="p-1 rounded text-amber-700 hover:bg-amber-200/60 shrink-0"
+            aria-label="Dismiss coin notification"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     </header>
   );
 };

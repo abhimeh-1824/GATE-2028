@@ -54,7 +54,7 @@ export async function loadStudyGroupMessages(): Promise<ChatGroupMessage[]> {
 
   if (error) throw chatRpcError('Could not load study group messages', error);
 
-  return (data || []).map((row) => ({
+  return (data || []).map((row: any) => ({
     id: row.message_id,
     senderChatId: row.sender_chat_id,
     senderIsMe: row.sender_is_me,
@@ -94,7 +94,7 @@ export async function loadChatConversations(): Promise<ChatConversationSummary[]
 
   if (error) throw chatRpcError('Could not load conversations', error);
 
-  return (data || []).map((row) => ({
+  return (data || []).map((row: any) => ({
     id: row.conversation_id,
     peerChatId: row.peer_chat_id,
     updatedAt: row.updated_at,
@@ -110,7 +110,7 @@ export async function loadChatMessages(conversationId: string): Promise<ChatMess
   if (error) throw chatRpcError('Could not load messages', error);
 
   return (data || [])
-    .map((row) => ({
+    .map((row: any) => ({
       id: row.message_id,
       senderIsMe: row.sender_is_me,
       body: row.body,

@@ -14,12 +14,14 @@ import {
   Play,
   Loader2,
   FileQuestion,
+  Coins,
 } from 'lucide-react';
 import {
   LevelTest,
   TestQuestion,
   TestAttempt,
   CorrectOptionKey,
+  CoinAwardBreakdown,
 } from '../../types';
 import { fetchQuestionsForTest } from '../../lib/notesTestsService';
 import { useStudy } from '../../context/StudyContext';
@@ -29,6 +31,7 @@ interface TestRunnerModalProps {
   onClose: () => void;
   test: LevelTest | null;
   breadcrumbs: string[];
+  initialReviewAttempt?: TestAttempt | null;
 }
 
 type RunnerStage = 'brief' | 'running' | 'review';
@@ -48,6 +51,7 @@ export const TestRunnerModal: React.FC<TestRunnerModalProps> = ({
   onClose,
   test,
   breadcrumbs,
+  initialReviewAttempt = null,
 }) => {
   const { isDemo, testAttempts, recordTestAttempt } = useStudy();
 
@@ -67,6 +71,7 @@ export const TestRunnerModal: React.FC<TestRunnerModalProps> = ({
 
   // Review state
   const [latestAttempt, setLatestAttempt] = useState<TestAttempt | null>(null);
+  const [latestCoinsAwarded, setLatestCoinsAwarded] = useState<CoinAwardBreakdown | null>(null);
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all');
 
   const pastAttempts = useMemo(() => {
@@ -83,12 +88,13 @@ export const TestRunnerModal: React.FC<TestRunnerModalProps> = ({
   useEffect(() => {
     if (!isOpen || !test) return;
     let active = true;
-    setStage('brief');
+    setStage(initialReviewAttempt ? 'review' : 'brief');
     setCurrentIndex(0);
     setAnswers({});
     setMarkedIds(new Set());
     setConfirmSubmitOpen(false);
-    setLatestAttempt(null);
+    setLatestAttempt(initialReviewAttempt || null);
+    setLatestCoinsAwarded(null);
     setReviewFilter('all');
     setLoadError(null);
     setLoadingQuestions(true);
@@ -109,7 +115,7 @@ export const TestRunnerModal: React.FC<TestRunnerModalProps> = ({
     return () => {
       active = false;
     };
-  }, [isOpen, test, isDemo]);
+  }, [isOpen, test, isDemo, initialReviewAttempt]);
 
   const handleFinalizeSubmit = useCallback(async () => {
     if (!test || isSubmitting) return;
@@ -149,6 +155,7 @@ export const TestRunnerModal: React.FC<TestRunnerModalProps> = ({
     };
 
     setLatestAttempt(fallbackAttempt);
+    setLatestCoinsAwarded(res.coinsAwarded || null);
     setIsSubmitting(false);
     setStage('review');
   }, [test, isSubmitting, questions, answers, startedAtMs, recordTestAttempt]);
@@ -174,6 +181,7 @@ export const TestRunnerModal: React.FC<TestRunnerModalProps> = ({
     setSecondsLeft(test.durationMinutes * 60);
     setStartedAtMs(Date.now());
     setConfirmSubmitOpen(false);
+    setLatestCoinsAwarded(null);
     setStage('running');
   };
 
@@ -368,22 +376,30 @@ export const TestRunnerModal: React.FC<TestRunnerModalProps> = ({
                       <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
                         <tr>
                           <th className="text-left px-4 py-2.5 font-semibold">Date</th>
-                          <th className="text-right px-4 py-2.5 font-semibold">Score</th>
+                          <th className="text-right px-4 py-2.5 font-semibold">Correct / Wrong</th>
                           <th className="text-right px-4 py-2.5 font-semibold">Accuracy</th>
                           <th className="text-right px-4 py-2.5 font-semibold">Time Taken</th>
                           <th className="text-right px-4 py-2.5 font-semibold">Status</th>
+                          <th className="text-right px-4 py-2.5 font-semibold">Result</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {pastAttempts.slice(0, 8).map((att) => {
                           const attPass = att.percentage >= test.passingPercentage;
+                          const attAnswered = Object.keys(att.answers || {}).length;
+                          const attWrong = Math.max(0, attAnswered - att.score);
                           return (
                             <tr key={att.id} className="hover:bg-slate-50">
                               <td className="px-4 py-2.5 text-slate-700">
                                 {new Date(att.completedAt).toLocaleString()}
                               </td>
-                              <td className="px-4 py-2.5 text-right font-mono tabular-nums font-semibold text-slate-900">
-                                {att.score} / {att.totalQuestions}
+                              <td className="px-4 py-2.5 text-right font-mono tabular-nums font-semibold">
+                                <span className="text-emerald-700">{att.score}✓</span>
+                                <span className="text-slate-300 mx-1">/</span>
+                                <span className="text-rose-600">{attWrong}✕</span>
+                                <span className="text-slate-400 text-[10px] ml-1">
+                                  ({att.totalQuestions} Qs)
+                                </span>
                               </td>
                               <td className="px-4 py-2.5 text-right font-mono tabular-nums font-bold text-indigo-700">
                                 {att.percentage}%
@@ -401,6 +417,19 @@ export const TestRunnerModal: React.FC<TestRunnerModalProps> = ({
                                 >
                                   {attPass ? 'PASSED' : 'REVIEW'}
                                 </span>
+                              </td>
+                              <td className="px-4 py-2.5 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setLatestAttempt(att);
+                                    setReviewFilter('all');
+                                    setStage('review');
+                                  }}
+                                  className="px-2.5 py-1 rounded-md border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-semibold"
+                                >
+                                  View Result
+                                </button>
                               </td>
                             </tr>
                           );
@@ -638,66 +667,148 @@ export const TestRunnerModal: React.FC<TestRunnerModalProps> = ({
             </div>
           ) : (
             /* ================= STAGE 3: INSTANT SCORE & EXPLANATION REVIEW ================= */
+            (() => {
+              const reviewTotal = latestAttempt?.totalQuestions ?? questions.length;
+              const reviewCorrect = latestAttempt?.score ?? 0;
+              const reviewAnswered = Object.keys(latestAttempt?.answers || {}).length;
+              const reviewWrong = Math.max(0, reviewAnswered - reviewCorrect);
+              const reviewSkipped = Math.max(0, reviewTotal - reviewAnswered);
+
+              return (
             <div className="p-5 sm:p-6 max-w-5xl mx-auto space-y-5">
               {/* Score Summary Card */}
-              <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                  <div
-                    className={`w-12 h-12 rounded-xl flex items-center justify-center border ${
-                      passed
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                        : 'bg-amber-50 border-amber-200 text-amber-700'
-                    }`}
-                  >
-                    <Award className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-base font-bold text-slate-900">Assessment Completed</h3>
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                          passed
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-rose-50 text-rose-700 border-rose-200'
-                        }`}
-                      >
-                        {passed ? 'PASSED' : 'NEEDS REVISION'} (Target {test.passingPercentage}%)
-                      </span>
+              <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <div
+                      className={`w-12 h-12 rounded-xl flex items-center justify-center border ${
+                        passed
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                          : 'bg-amber-50 border-amber-200 text-amber-700'
+                      }`}
+                    >
+                      <Award className="w-6 h-6" />
                     </div>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Score:{' '}
-                      <strong className="font-mono text-slate-900">
-                        {latestAttempt?.score ?? 0} / {latestAttempt?.totalQuestions ?? questions.length}
-                      </strong>{' '}
-                      • Percentage:{' '}
-                      <strong className="font-mono text-indigo-700">
-                        {latestAttempt?.percentage ?? 0}%
-                      </strong>{' '}
-                      • Time:{' '}
-                      <strong className="font-mono text-slate-800">
-                        {formatSeconds(latestAttempt?.timeTakenSeconds ?? 0)}
-                      </strong>
-                    </p>
+                    <div>
+                      <div className="flex items-center flex-wrap gap-2">
+                        <h3 className="text-base font-bold text-slate-900">Test Result &amp; Review</h3>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                            passed
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-rose-50 text-rose-700 border-rose-200'
+                          }`}
+                        >
+                          {passed ? 'PASSED' : 'NEEDS REVISION'} (Target {test.passingPercentage}%)
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Score:{' '}
+                        <strong className="font-mono text-slate-900">
+                          {reviewCorrect} / {reviewTotal}
+                        </strong>{' '}
+                        • Percentage:{' '}
+                        <strong className="font-mono text-indigo-700">
+                          {latestAttempt?.percentage ?? 0}%
+                        </strong>{' '}
+                        • Time:{' '}
+                        <strong className="font-mono text-slate-800">
+                          {formatSeconds(latestAttempt?.timeTakenSeconds ?? 0)}
+                        </strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center flex-wrap gap-2">
+                    {pastAttempts.length > 1 && (
+                      <select
+                        value={latestAttempt?.id || ''}
+                        onChange={(e) => {
+                          const found = pastAttempts.find((a) => a.id === e.target.value);
+                          if (found) setLatestAttempt(found);
+                        }}
+                        aria-label="Switch past attempt"
+                        className="px-2.5 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs font-medium text-slate-700"
+                      >
+                        {pastAttempts.map((att, idx) => (
+                          <option key={att.id} value={att.id}>
+                            Attempt #{pastAttempts.length - idx} ({att.percentage}% •{' '}
+                            {new Date(att.completedAt).toLocaleDateString()})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <button
+                      type="button"
+                      onClick={startTest}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      Retake Test
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="px-4 py-2 rounded-lg bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-semibold"
+                    >
+                      Done
+                    </button>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={startTest}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    Retake Test
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className="px-4 py-2 rounded-lg bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-semibold"
-                  >
-                    Done
-                  </button>
+                {/* Explicit Correct / Wrong / Skipped Breakdown */}
+                <div className="grid grid-cols-3 gap-3 pt-3 border-t border-slate-100">
+                  <div className="px-3.5 py-2.5 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-emerald-800 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      Correct
+                    </span>
+                    <span className="text-base font-bold font-mono tabular-nums text-emerald-800">
+                      {reviewCorrect}
+                    </span>
+                  </div>
+                  <div className="px-3.5 py-2.5 rounded-lg bg-rose-50 border border-rose-200 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-rose-800 flex items-center gap-1.5">
+                      <XCircle className="w-4 h-4 text-rose-600" />
+                      Wrong
+                    </span>
+                    <span className="text-base font-bold font-mono tabular-nums text-rose-800">
+                      {reviewWrong}
+                    </span>
+                  </div>
+                  <div className="px-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-600">Skipped</span>
+                    <span className="text-base font-bold font-mono tabular-nums text-slate-700">
+                      {reviewSkipped}
+                    </span>
+                  </div>
                 </div>
+
+                {/* Coins Earned Breakdown Banner */}
+                {latestCoinsAwarded && latestCoinsAwarded.totalCoins > 0 && (
+                  <div className="p-3.5 rounded-lg bg-amber-50 border border-amber-200 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0">
+                        <Coins className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-amber-950 font-mono">
+                          +{latestCoinsAwarded.totalCoins} Coins Earned on this Attempt!
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                          {latestCoinsAwarded.items.map((item, idx) => (
+                            <span
+                              key={`${item.category}-${idx}`}
+                              className="text-[11px] text-amber-900 bg-white/80 border border-amber-200 px-2 py-0.5 rounded font-medium"
+                            >
+                              +{item.amount} · {item.reason}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Filter Bar */}
@@ -820,6 +931,8 @@ export const TestRunnerModal: React.FC<TestRunnerModalProps> = ({
                 )}
               </div>
             </div>
+              );
+            })()
           )}
         </div>
       </div>

@@ -172,12 +172,12 @@ export const ComparisonCharts: React.FC<ComparisonChartsProps> = ({
           })}
         </div>
 
-        {/* Database real users note if 1 user */}
+        {/* Note if only 1 aspirant is currently visible */}
         {profiles.length <= 1 && (
           <div className="mt-3 p-3 bg-indigo-50/70 border border-indigo-200 rounded-lg flex items-center gap-2 text-xs text-indigo-900">
             <Info className="w-4 h-4 text-indigo-600 shrink-0" />
             <span>
-              <strong>Real Database Mode:</strong> Displaying telemetry for the 1 currently registered user. When additional peers sign up or sync in Supabase, their real progress polygons will automatically appear for comparison.
+              <strong>Waiting for more aspirants:</strong> Invite your GATE DA study partners to join so you can compare progress charts side-by-side.
             </span>
           </div>
         )}

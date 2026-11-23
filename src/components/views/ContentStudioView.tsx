@@ -634,7 +634,11 @@ export const ContentStudioView: React.FC = () => {
     });
     setSavingTest(false);
     if (res.success && res.test) {
-      showFeedback('success', 'Test created. Now import or add questions below.');
+      const coinNote =
+        res.coinsAwarded && res.coinsAwarded.totalCoins > 0
+          ? ` (+${res.coinsAwarded.totalCoins} Coins earned!)`
+          : '';
+      showFeedback('success', `Test created${coinNote} Now import or add questions below.`);
       setActiveManagedTestId(res.test.id);
       resetTestForm();
     } else {

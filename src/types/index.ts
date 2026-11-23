@@ -189,6 +189,21 @@ export interface DbSubtopicRow {
   topic_id: string; // uuid
 }
 
+export interface StreakDayStatus {
+  dateKey: string; // YYYY-MM-DD
+  dayShort: string; // S, M, T, W, T, F, S
+  isToday: boolean;
+  active: boolean;
+}
+
+export interface StudyStreakInfo {
+  currentStreak: number;
+  longestStreak: number;
+  studiedToday: boolean;
+  last7Days: StreakDayStatus[];
+  activeDatesCount: number;
+}
+
 export interface UserSettings {
   targetAir: number;
   targetYear: number;
@@ -196,6 +211,7 @@ export interface UserSettings {
   dailyGoalHours: number;
   weeklyGoalHours: number;
   streakCount: number;
+  activeStudyDates?: string[]; // YYYY-MM-DD local dates with real study activity
   userName: string;
   targetCollege: string; // e.g. "IISc Bangalore (M.Tech AI) / IIT Bombay"
   shareProgressWithCohort?: boolean; // Privacy toggle for peer leaderboard
@@ -286,6 +302,8 @@ export interface UserProgressProfile {
   mockTestsTaken: number;
   mockAverageScore: number;
   studyStreakDays: number;
+  coinBalance?: number;
+  testsCreated?: number;
   lastActive: string;
   isCurrentUser?: boolean;
   subjects: SubjectProgressSummary[];
@@ -396,4 +414,46 @@ export interface ManagedUserProfile {
   role: UserRole;
   createdAt: string;
 }
+
+// ============================================================================
+// Coin System & Competitive Leaderboard Types
+// ============================================================================
+export type CoinCategory =
+  | 'test_created'
+  | 'test_attempted'
+  | 'accuracy_bonus'
+  | 'improvement_bonus';
+
+export interface CoinTransaction {
+  id: string;
+  userId: string;
+  amount: number;
+  category: CoinCategory;
+  reason: string;
+  referenceId?: string | null;
+  createdAt: string;
+}
+
+export interface CoinAwardItem {
+  category: CoinCategory;
+  amount: number;
+  reason: string;
+}
+
+export interface CoinAwardBreakdown {
+  totalCoins: number;
+  items: CoinAwardItem[];
+}
+
+export interface LeaderboardEntry {
+  userId: string;
+  fullName: string;
+  role?: UserRole;
+  coinBalance: number;
+  testsCreated: number;
+  testsAttempted: number;
+  rank: number;
+  isCurrentUser?: boolean;
+}
+
 

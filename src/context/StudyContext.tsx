@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Subject,
   Topic,
@@ -23,6 +23,10 @@ import {
   CorrectOptionKey,
   LinkedAppletConfig,
   AppletSyncPayload,
+  CoinTransaction,
+  CoinAwardBreakdown,
+  LeaderboardEntry,
+  StudyStreakInfo,
 } from '../types';
 import {
   INITIAL_SPRINTS,
@@ -31,6 +35,7 @@ import {
   createFreshZeroSubjects,
 } from '../data/gateDaSyllabus';
 import { soundManager } from '../utils/audio';
+import { computeStudyStreak, getTodayLocalDateKey } from '../utils/streak';
 import { supabase } from '../lib/supabase';
 import { ensureChatGroupMembership as joinStudyGroup } from '../lib/chatService';
 import {
@@ -68,6 +73,13 @@ import {
   deleteLevelTest,
   submitTestAttempt,
 } from '../lib/notesTestsService';
+import {
+  COINS_TEST_CREATE,
+  calculateAttemptCoinReward,
+  fetchCoinState,
+  awardCoins,
+  fetchCoinLeaderboard,
+} from '../lib/coinService';
 import {
   loadUserStudyState,
   saveUserStudyState,
@@ -149,6 +161,7 @@ interface StudyContextType {
   overallPyqAccuracy: number;
   daysRemaining: number;
   revisionDueCount: number;
+  streakInfo: StudyStreakInfo;
 
   // Actions
   toggleTaskCompletion: (taskId: string) => void;
@@ -208,7 +221,7 @@ interface StudyContextType {
     durationMinutes: number;
     passingPercentage: number;
     isActive: boolean;
-  }) => Promise<{ success: boolean; test?: LevelTest; error?: string }>;
+  }) => Promise<{ success: boolean; test?: LevelTest; coinsAwarded?: CoinAwardBreakdown; error?: string }>;
   editLevelTest: (
     testId: string,
     patch: Partial<Pick<LevelTest, 'title' | 'description' | 'durationMinutes' | 'passingPercentage' | 'isActive'>>
@@ -220,7 +233,16 @@ interface StudyContextType {
     score: number;
     totalQuestions: number;
     timeTakenSeconds: number;
-  }) => Promise<{ success: boolean; attempt?: TestAttempt; error?: string }>;
+  }) => Promise<{ success: boolean; attempt?: TestAttempt; coinsAwarded?: CoinAwardBreakdown; error?: string }>;
+
+  // Coin Economy & Competitive Leaderboard
+  coinBalance: number;
+  coinTransactions: CoinTransaction[];
+  leaderboard: LeaderboardEntry[];
+  coinsLoading: boolean;
+  lastCoinToast: { amount: number; reason: string } | null;
+  dismissCoinToast: () => void;
+  refreshCoinsAndLeaderboard: () => Promise<void>;
   addMockTest: (mock: Omit<MockTest, 'id'>) => void;
   updateMockTest: (mockId: string, updates: Partial<MockTest>) => void;
   deleteMockTest: (mockId: string) => void;
@@ -321,7 +343,8 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         examDate: '2028-02-13',
         dailyGoalHours: 4.5,
         weeklyGoalHours: 28,
-        streakCount: 1,
+        streakCount: 0,
+        activeStudyDates: [],
         userName: user?.fullName || 'Aspirant',
         targetCollege: user?.targetCollege || 'IISc Bangalore (M.Tech AI)',
         shareProgressWithCohort: false,
@@ -870,6 +893,19 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const diffTime = examDateObj.getTime() - nowObj.getTime();
   const daysRemaining = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
 
+  // Record today's study activity date for Consistent Streak tracking
+  const recordStudyActivityToday = useCallback(() => {
+    const todayKey = getTodayLocalDateKey();
+    setSettings((prev) => {
+      const existing = Array.isArray(prev.activeStudyDates) ? prev.activeStudyDates : [];
+      if (existing.includes(todayKey)) return prev;
+      return {
+        ...prev,
+        activeStudyDates: [...existing, todayKey].slice(-365),
+      };
+    });
+  }, []);
+
   // Actions
   const toggleTaskCompletion = (taskId: string) => {
     setTasks((prev) =>
@@ -885,6 +921,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             syncTaskToSupabase(updated, currentUser.id);
           }
           if (nextState) {
+            recordStudyActivityToday();
             soundManager.playCompletionChime();
           } else {
             soundManager.playSubtleTick();
@@ -906,6 +943,9 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       status: initialStatus,
     };
     setTasks((prev) => [newTask, ...prev]);
+    if (newTask.completed) {
+      recordStudyActivityToday();
+    }
     if (currentUser?.id) {
       syncTaskToSupabase(newTask, currentUser.id);
     }
@@ -959,6 +999,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             syncTaskToSupabase(updated, currentUser.id);
           }
           if (isDone && !t.completed) {
+            recordStudyActivityToday();
             soundManager.playCompletionChime();
           } else {
             soundManager.playSubtleTick();
@@ -1397,6 +1438,23 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [notesTestsLoading, setNotesTestsLoading] = useState<boolean>(false);
   const [notesTestsNotice, setNotesTestsNotice] = useState<string | null>(null);
 
+  // Coin Economy & Competitive Leaderboard State
+  const [coinBalance, setCoinBalance] = useState<number>(0);
+  const [coinTransactions, setCoinTransactions] = useState<CoinTransaction[]>([]);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [coinsLoading, setCoinsLoading] = useState<boolean>(false);
+  const [lastCoinToast, setLastCoinToast] = useState<{ amount: number; reason: string } | null>(null);
+
+  const dismissCoinToast = useCallback(() => {
+    setLastCoinToast(null);
+  }, []);
+
+  useEffect(() => {
+    if (!lastCoinToast) return;
+    const timer = window.setTimeout(() => setLastCoinToast(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [lastCoinToast]);
+
   const isAdmin = userRole === 'admin';
   const canManageContent = userRole === 'admin' || userRole === 'content_manager';
 
@@ -1486,16 +1544,83 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return { success: false, error: res.error || 'Could not delete study note.' };
   };
 
+  const refreshCoinsAndLeaderboard = useCallback(async () => {
+    if (!currentUser) {
+      setCoinBalance(0);
+      setCoinTransactions([]);
+      setLeaderboard([]);
+      return;
+    }
+    setCoinsLoading(true);
+    try {
+      const coinState = await fetchCoinState(currentUser.id, isDemo);
+      setCoinBalance(coinState.balance);
+      setCoinTransactions(coinState.transactions);
+
+      const lbRes = await fetchCoinLeaderboard({
+        currentUserId: currentUser.id,
+        currentUserName: currentUser.fullName,
+        currentUserRole: userRole,
+        currentUserBalance: coinState.balance,
+        levelTests,
+        testAttempts,
+        isDemo,
+      });
+      setLeaderboard(lbRes.entries);
+    } catch (err) {
+      console.warn('Error refreshing coins & leaderboard:', err);
+    } finally {
+      setCoinsLoading(false);
+    }
+  }, [currentUser, isDemo, userRole, levelTests, testAttempts]);
+
+  useEffect(() => {
+    refreshCoinsAndLeaderboard();
+  }, [refreshCoinsAndLeaderboard]);
+
   const addLevelTest: StudyContextType['addLevelTest'] = async (input) => {
     const res = await createLevelTest({
       ...input,
       userId: currentUser?.id,
+      creatorName: currentUser?.fullName,
       isDemo,
     });
     if (res.data) {
-      setLevelTests((prev) => [res.data!, ...prev]);
+      const createdTest = res.data;
+      setLevelTests((prev) => [createdTest, ...prev]);
+
+      let coinsAwarded: CoinAwardBreakdown | undefined;
+      if (currentUser?.id) {
+        const rewardItems = [
+          {
+            category: 'test_created' as const,
+            amount: COINS_TEST_CREATE,
+            reason: `Created test "${createdTest.title}"`,
+          },
+        ];
+        const awardRes = await awardCoins({
+          userId: currentUser.id,
+          items: rewardItems,
+          referenceId: createdTest.id,
+          isDemo,
+        });
+        if (awardRes.totalAwarded > 0) {
+          setCoinBalance((prev) => prev + awardRes.totalAwarded);
+          setCoinTransactions((prev) => [...awardRes.transactions, ...prev]);
+          setLastCoinToast({
+            amount: awardRes.totalAwarded,
+            reason: `Test created: "${createdTest.title}"`,
+          });
+          coinsAwarded = {
+            totalCoins: awardRes.totalAwarded,
+            items: rewardItems,
+          };
+        }
+      }
+
+      recordStudyActivityToday();
       soundManager.playCompletionChime();
-      return { success: true, test: res.data };
+      return { success: true, test: createdTest, coinsAwarded };
     }
     return { success: false, error: res.error || 'Could not create test.' };
   };
@@ -1524,15 +1649,56 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const recordTestAttempt: StudyContextType['recordTestAttempt'] = async (input) => {
+    // Capture previous best BEFORE recording the new attempt so we compute fair rewards
+    const priorAttemptsForTest = testAttempts.filter((a) => a.testId === input.testId);
+    const previousBestPercentage =
+      priorAttemptsForTest.length > 0
+        ? Math.max(...priorAttemptsForTest.map((a) => a.percentage))
+        : null;
+
     const res = await submitTestAttempt({
       ...input,
       userId: currentUser?.id,
       isDemo,
     });
     if (res.data) {
-      setTestAttempts((prev) => [res.data!, ...prev]);
+      const savedAttempt = res.data;
+      setTestAttempts((prev) => [savedAttempt, ...prev]);
+
+      let coinsAwarded: CoinAwardBreakdown | undefined;
+      if (currentUser?.id) {
+        const targetTest = levelTests.find((t) => t.id === input.testId);
+        const breakdown = calculateAttemptCoinReward(
+          savedAttempt.percentage,
+          previousBestPercentage,
+          targetTest?.title || 'Assessment'
+        );
+
+        if (breakdown.totalCoins > 0) {
+          const awardRes = await awardCoins({
+            userId: currentUser.id,
+            items: breakdown.items,
+            referenceId: savedAttempt.id,
+            isDemo,
+          });
+          if (awardRes.totalAwarded > 0) {
+            setCoinBalance((prev) => prev + awardRes.totalAwarded);
+            setCoinTransactions((prev) => [...awardRes.transactions, ...prev]);
+            setLastCoinToast({
+              amount: awardRes.totalAwarded,
+              reason:
+                previousBestPercentage === null
+                  ? `Completed "${targetTest?.title || 'Test'}" (${savedAttempt.percentage}%)`
+                  : `New personal best (${savedAttempt.percentage}%)`,
+            });
+            coinsAwarded = breakdown;
+          }
+        }
+      }
+
+      recordStudyActivityToday();
       soundManager.playCompletionChime();
-      return { success: true, attempt: res.data };
+      return { success: true, attempt: savedAttempt, coinsAwarded };
     }
     return { success: false, error: res.error || 'Could not record test attempt.' };
   };
@@ -1548,12 +1714,15 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             return {
               ...top,
               status,
-              lastRevised: status === 'completed' ? new Date().toISOString().split('T')[0] : top.lastRevised,
+              lastRevised: status === 'completed' ? getTodayLocalDateKey() : top.lastRevised,
             };
           }),
         };
       })
     );
+    if (status === 'completed') {
+      recordStudyActivityToday();
+    }
     soundManager.playSubtleTick();
   };
 
@@ -1578,6 +1747,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       id: `mock_${Date.now()}`,
     };
     setMockTests((prev) => [newMock, ...prev]);
+    recordStudyActivityToday();
     soundManager.playCompletionChime();
   };
 
@@ -1630,15 +1800,42 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       type: 'concept',
       durationMinutes: minutes,
       completed: true,
-      date: new Date().toISOString().split('T')[0],
+      date: getTodayLocalDateKey(),
       scheduledTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       priority: 'high',
     };
     setTasks((prev) => [newTask, ...prev]);
+    recordStudyActivityToday();
     if (currentUser?.id) {
       syncTaskToSupabase(newTask, currentUser.id);
     }
   };
+
+  // Real Consistent Streak Engine: computes live streak & syncs settings.streakCount automatically
+  const streakInfo = useMemo(
+    () =>
+      computeStudyStreak({
+        activeStudyDates: settings.activeStudyDates,
+        tasks,
+        testAttempts,
+        levelTests,
+        mockTests,
+        subjects,
+        currentUserId: currentUser?.id,
+      }),
+    [settings.activeStudyDates, tasks, testAttempts, levelTests, mockTests, subjects, currentUser?.id]
+  );
+
+  // Keep settings.streakCount always in sync with real computed streak so cloud state & peer profiles stay accurate
+  useEffect(() => {
+    if (settings.streakCount !== streakInfo.currentStreak) {
+      setSettings((prev) =>
+        prev.streakCount === streakInfo.currentStreak
+          ? prev
+          : { ...prev, streakCount: streakInfo.currentStreak }
+      );
+    }
+  }, [streakInfo.currentStreak, settings.streakCount]);
 
   const updateSettings = (newSettings: Partial<UserSettings>) => {
     setSettings((prev) => ({ ...prev, ...newSettings }));
@@ -1996,6 +2193,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         overallPyqAccuracy,
         daysRemaining,
         revisionDueCount,
+        streakInfo,
         toggleTaskCompletion,
         addTask,
         updateTask,
@@ -2035,6 +2233,13 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         editLevelTest,
         removeLevelTest,
         recordTestAttempt,
+        coinBalance,
+        coinTransactions,
+        leaderboard,
+        coinsLoading,
+        lastCoinToast,
+        dismissCoinToast,
+        refreshCoinsAndLeaderboard,
         addMockTest,
         updateMockTest,
         deleteMockTest,

@@ -22,6 +22,8 @@ import { CalendarView } from './components/views/CalendarView';
 import { PeerCompareView } from './components/views/PeerCompareView';
 import { GuideView } from './components/views/GuideView';
 import { ContentStudioView } from './components/views/ContentStudioView';
+import { TestsView } from './components/views/TestsView';
+import { LeaderboardView } from './components/views/LeaderboardView';
 import { ChatView } from './components/views/ChatView';
 import { SubjectId } from './types';
 
@@ -158,8 +160,6 @@ const MainAppContent: React.FC = () => {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top Utility Header (56px) - Responsive & Clean */}
         <TopBar
-          onOpenOmnibox={() => setIsOmniboxOpen(true)}
-          onOpenAddTask={() => setIsAddTaskOpen(true)}
           onOpenBackup={() => setIsBackupOpen(true)}
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
           onOpenTour={() => setIsTourOpen(true)}
@@ -198,9 +198,13 @@ const MainAppContent: React.FC = () => {
             />
           )}
 
+          {activeView === 'Tests' && <TestsView />}
+
           {activeView === 'ContentStudio' && <ContentStudioView />}
 
           {activeView === 'Roadmap' && <RoadmapView />}
+
+          {activeView === 'Leaderboard' && <LeaderboardView />}
 
           {activeView === 'Analytics' && <AnalyticsView />}
 

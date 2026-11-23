@@ -74,8 +74,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             <div className="text-left">
               <div className="text-[11px] font-medium text-slate-500">Active Streak</div>
-              <div className="text-xl font-bold text-emerald-600 font-mono">
-                {settings.streakCount} Days
+              <div className="text-xl font-bold text-emerald-600 font-mono tabular-nums">
+                {settings.streakCount} {settings.streakCount === 1 ? 'Day' : 'Days'}
               </div>
             </div>
 

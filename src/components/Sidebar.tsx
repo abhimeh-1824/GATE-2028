@@ -22,6 +22,8 @@ import {
   Workflow,
   Library,
   TrendingUp,
+  ClipboardCheck,
+  Trophy,
 } from 'lucide-react';
 import { useStudy } from '../context/StudyContext';
 import { soundManager } from '../utils/audio';
@@ -52,11 +54,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
     settings,
     currentUser,
     canManageContent,
+    levelTests,
+    testAttempts,
+    coinBalance,
+    streakInfo,
     resetToDefaults,
   } = useStudy();
   const [soundEnabled, setSoundEnabled] = React.useState(soundManager.isEnabled());
 
   const incompleteTasksCount = tasks.filter((t) => !t.completed).length;
+  const activeTestsCount = levelTests.filter((t) => t.isActive).length;
+  const attemptedTestIds = new Set(testAttempts.map((a) => a.testId));
+  const pendingTestsCount = levelTests.filter(
+    (t) => t.isActive && !attemptedTestIds.has(t.id)
+  ).length;
 
   const toggleSound = () => {
     const next = !soundEnabled;
@@ -114,8 +125,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'Subjects',
       label: 'Subjects & Curriculum',
       icon: BookOpen,
-      badge: 'Notes & Tests',
+      badge: 'Notes & Tree',
       badgeColor: 'text-indigo-700 bg-indigo-50 font-mono font-bold',
+    },
+    {
+      id: 'Tests',
+      label: 'Tests & Results',
+      icon: ClipboardCheck,
+      badge:
+        pendingTestsCount > 0
+          ? `${pendingTestsCount} new`
+          : activeTestsCount > 0
+            ? `${activeTestsCount} tests`
+            : 'All Tests',
+      badgeColor:
+        pendingTestsCount > 0
+          ? 'text-amber-700 bg-amber-50 font-mono font-bold'
+          : 'text-emerald-700 bg-emerald-50 font-mono font-bold',
     },
     {
       id: 'ContentStudio',
@@ -130,6 +156,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // ── Performance & Insights group ──
   const performanceInsightsChildren: NavChildItem[] = [
+    {
+      id: 'Leaderboard',
+      label: 'Coin Leaderboard',
+      icon: Trophy,
+      badge: `${coinBalance.toLocaleString()} Coins`,
+      badgeColor: 'text-amber-800 bg-amber-50 font-mono font-bold',
+    },
     {
       id: 'Analytics',
       label: 'Analytics & Telemetry',
@@ -313,23 +346,72 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Footer Section */}
       <div className="p-3 border-t border-slate-100 bg-slate-50/50 space-y-2.5">
-        {/* Streak Indicator */}
-        <div className="px-2 py-1.5 bg-white rounded-md border border-slate-200/80">
-          <div className="flex items-center justify-between text-[11px] mb-1">
+        {/* Real Consistent Streak Indicator */}
+        <div
+          className="px-2.5 py-2 bg-white rounded-md border border-slate-200/80 space-y-1.5"
+          title={`Current streak: ${streakInfo.currentStreak} day(s) • Best: ${streakInfo.longestStreak} day(s)`}
+        >
+          <div className="flex items-center justify-between text-[11px]">
             <span className="font-medium text-slate-600">Consistent Streak</span>
-            <span className="font-bold text-emerald-600 font-mono flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-amber-500" />
-              {settings.streakCount} Days
+            <span
+              className={`font-bold font-mono tabular-nums flex items-center gap-1 ${
+                streakInfo.currentStreak > 0 ? 'text-emerald-600' : 'text-slate-500'
+              }`}
+            >
+              <Sparkles
+                className={`w-3 h-3 ${
+                  streakInfo.studiedToday ? 'text-amber-500' : 'text-slate-400'
+                }`}
+              />
+              {streakInfo.currentStreak} {streakInfo.currentStreak === 1 ? 'Day' : 'Days'}
             </span>
           </div>
-          <div className="flex items-center justify-between text-[10px] text-emerald-500">
-            <span>●</span>
-            <span>●</span>
-            <span>●</span>
-            <span>●</span>
-            <span>●</span>
-            <span>●</span>
-            <span className="text-slate-300">○</span>
+
+          {/* Live Last-7-Days Activity Dots */}
+          <div className="grid grid-cols-7 gap-1 pt-0.5">
+            {streakInfo.last7Days.map((day) => (
+              <div
+                key={day.dateKey}
+                className="flex flex-col items-center gap-0.5"
+                title={`${day.dateKey}${day.isToday ? ' (Today)' : ''}: ${
+                  day.active ? 'Studied' : 'No activity'
+                }`}
+              >
+                <span
+                  className={`w-2.5 h-2.5 rounded-full transition-colors ${
+                    day.active
+                      ? 'bg-emerald-500 shadow-2xs'
+                      : day.isToday
+                        ? 'border-2 border-amber-400 bg-amber-50'
+                        : 'bg-slate-200'
+                  }`}
+                />
+                <span
+                  className={`text-[9px] font-mono leading-none ${
+                    day.isToday
+                      ? 'font-bold text-indigo-700'
+                      : day.active
+                        ? 'text-emerald-700 font-semibold'
+                        : 'text-slate-400'
+                  }`}
+                >
+                  {day.dayShort}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between text-[10px] pt-0.5 border-t border-slate-100">
+            <span className={streakInfo.studiedToday ? 'text-emerald-700 font-medium' : 'text-amber-700 font-medium'}>
+              {streakInfo.studiedToday
+                ? 'Active today ✓'
+                : 'Complete 1 task/test today'}
+            </span>
+            {streakInfo.longestStreak > 0 && (
+              <span className="font-mono text-slate-400">
+                Best {streakInfo.longestStreak}d
+              </span>
+            )}
           </div>
         </div>
 

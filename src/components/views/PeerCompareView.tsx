@@ -23,14 +23,15 @@ import {
   Layers,
   ArrowUpDown,
   BookOpen,
-  Database,
+  Coins,
+  Trophy,
   RefreshCw,
   UploadCloud,
   Check,
   UserPlus,
   Link2,
 } from 'lucide-react';
-import { DEFAULT_LINKED_APPLET_URL } from '../../lib/linkedAppletSyncService';
+import { getCoinTier } from '../../lib/coinService';
 
 export const PeerCompareView: React.FC = () => {
   const {
@@ -41,14 +42,11 @@ export const PeerCompareView: React.FC = () => {
     settings,
     updateSettings,
     setIsAuthModalOpen,
-    linkedAppletConfig,
-    syncWithLinkedApplet,
-    isSyncingLinkedApplet,
-    setIsLinkedSyncModalOpen,
-    linkedSyncMessage,
+    coinBalance,
+    levelTests,
   } = useStudy();
 
-  const [activeTab, setActiveTab] = useState<'charts' | 'directory' | 'leaderboard'>('charts');
+  const [activeTab, setActiveTab] = useState<'charts' | 'directory' | 'leaderboard'>('leaderboard');
   const [searchQuery, setSearchQuery] = useState('');
   const [targetAirFilter, setTargetAirFilter] = useState<'all' | 'top20' | 'top50'>('all');
   const [selectedPeerForAudit, setSelectedPeerForAudit] = useState<UserProgressProfile | null>(null);
@@ -61,7 +59,7 @@ export const PeerCompareView: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
 
-  // Fetch all REAL users directly from the database
+  // Fetch all registered aspirants & live coin rankings
   const loadRealPeers = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -70,17 +68,19 @@ export const PeerCompareView: React.FC = () => {
         subjects,
         totalHoursStudied,
         mockTests,
-        settings
+        settings,
+        coinBalance,
+        levelTests
       );
       setProfiles(res.profiles);
       setDbConnected(res.dbConnected);
       setDbMessage(res.message);
     } catch (e: any) {
-      console.warn('Error loading real peers from database:', e);
+      console.warn('Error loading aspirants leaderboard:', e);
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser, subjects, totalHoursStudied, mockTests, settings]);
+  }, [currentUser, subjects, totalHoursStudied, mockTests, settings, coinBalance, levelTests]);
 
   useEffect(() => {
     loadRealPeers();
@@ -154,26 +154,26 @@ export const PeerCompareView: React.FC = () => {
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-bold text-indigo-700 font-mono uppercase tracking-wider flex items-center gap-1.5">
                 <Users className="w-3.5 h-3.5" />
-                PEER BENCHMARKING ENGINE
+                COMMUNITY &amp; RANKINGS
+              </span>
+              <span className="text-slate-300">·</span>
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold border border-amber-200">
+                <Trophy className="w-3 h-3" />
+                COIN LEADERBOARD
               </span>
               <span className="text-slate-300">·</span>
               <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold border border-emerald-200">
                 <CheckCircle2 className="w-3 h-3" />
-                VERIFIED ASPIRANTS
-              </span>
-              <span className="text-slate-300">·</span>
-              <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-bold border border-indigo-200">
-                <Award className="w-3 h-3" />
-                COHORT TELEMETRY
+                LIVE STANDINGS
               </span>
             </div>
 
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-              Peer Progress &amp; Comparison Hub
+              Aspirants Leaderboard &amp; Progress Hub
             </h1>
 
             <p className="text-xs text-slate-600 leading-relaxed">
-              Transparent academic benchmarking. Compare your syllabus coverage, problem-solving accuracy, logged study hours, and mock test scores with verified GATE DA aspirants across India.
+              See where you stand among fellow GATE DA aspirants. Earn coins by creating and acing tests, track study consistency, and push yourself toward the top ranks.
             </p>
           </div>
 
@@ -243,12 +243,12 @@ export const PeerCompareView: React.FC = () => {
           </div>
         </div>
 
-        {/* Real Database Benchmark Numbers Strip */}
+        {/* Community Summary Strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-slate-100 font-mono">
           <div className="p-3 bg-[#faf8ff] border border-indigo-100 rounded-lg">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Real Aspirants in DB</div>
-            <div className="text-xl font-extrabold text-indigo-700 mt-0.5">{profiles.length} Registered</div>
-            <div className="text-[10px] text-slate-400 mt-0.5">Zero hardcoding</div>
+            <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Total Aspirants</div>
+            <div className="text-xl font-extrabold text-indigo-700 mt-0.5">{profiles.length} Active</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">Competing together</div>
           </div>
 
           <div className="p-3 bg-[#faf8ff] border border-indigo-100 rounded-lg">
@@ -278,17 +278,26 @@ export const PeerCompareView: React.FC = () => {
       </section>
 
       {/* Main Tab Navigation */}
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+      <div className="flex items-center flex-wrap gap-2 border-b border-slate-200 pb-2">
         <button
-          onClick={() => setActiveTab('charts')}
+          onClick={() => setActiveTab('leaderboard')}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-            activeTab === 'charts'
+            activeTab === 'leaderboard'
               ? 'bg-indigo-700 text-white shadow-2xs'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
           }`}
         >
-          <BarChart3 className="w-4 h-4" />
-          <span>Interactive Comparison Charts</span>
+          <Trophy className="w-4 h-4" />
+          <span>Rank &amp; Velocity Leaderboard</span>
+          <span
+            className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+              activeTab === 'leaderboard'
+                ? 'bg-white/20 text-white'
+                : 'bg-amber-100 text-amber-800'
+            }`}
+          >
+            {profiles.length}
+          </span>
         </button>
 
         <button
@@ -301,21 +310,27 @@ export const PeerCompareView: React.FC = () => {
         >
           <Users className="w-4 h-4" />
           <span>Aspirants Directory &amp; Inspect</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-200 text-slate-700">
+          <span
+            className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+              activeTab === 'directory'
+                ? 'bg-white/20 text-white'
+                : 'bg-slate-200 text-slate-700'
+            }`}
+          >
             {profiles.length}
           </span>
         </button>
 
         <button
-          onClick={() => setActiveTab('leaderboard')}
+          onClick={() => setActiveTab('charts')}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-            activeTab === 'leaderboard'
+            activeTab === 'charts'
               ? 'bg-indigo-700 text-white shadow-2xs'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
           }`}
         >
-          <Award className="w-4 h-4" />
-          <span>Rank &amp; Velocity Leaderboard</span>
+          <BarChart3 className="w-4 h-4" />
+          <span>Interactive Comparison Charts</span>
         </button>
       </div>
 
@@ -338,7 +353,7 @@ export const PeerCompareView: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search real user by name, college, email..."
+                placeholder="Search aspirant by name or target college..."
                 className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
@@ -353,7 +368,7 @@ export const PeerCompareView: React.FC = () => {
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                All Real Users
+                All Aspirants
               </button>
               <button
                 onClick={() => setTargetAirFilter('top20')}
@@ -420,9 +435,15 @@ export const PeerCompareView: React.FC = () => {
                         </div>
                       </div>
 
-                      <span className="text-xs font-extrabold font-mono text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded">
-                        AIR #{peer.targetAir}
-                      </span>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span className="inline-flex items-center gap-1 text-xs font-extrabold font-mono text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                          <Coins className="w-3 h-3 text-amber-600" />
+                          {(peer.coinBalance ?? 0).toLocaleString()}
+                        </span>
+                        <span className="text-[10px] font-bold font-mono text-indigo-700 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded">
+                          AIR #{peer.targetAir}
+                        </span>
+                      </div>
                     </div>
 
                     {/* Overall Progress Bar */}
@@ -509,7 +530,7 @@ export const PeerCompareView: React.FC = () => {
                     Invite a Peer / Create a Second Account
                   </h4>
                   <p className="text-xs text-slate-500 max-w-xs">
-                    All telemetry is strictly fetched from the database. To benchmark against another student, register a second account in the top-right menu or invite your study partner.
+                    Invite your GATE DA study partners to join the portal, earn coins, and compete together on the live leaderboard.
                   </p>
                 </div>
                 <button
@@ -524,21 +545,22 @@ export const PeerCompareView: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 3: LEADERBOARD & RANK TARGETS */}
+      {/* TAB 3: RANK & VELOCITY LEADERBOARD (ALL USERS RANKED BY COINS) */}
       {activeTab === 'leaderboard' && (
         <section className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs">
-          <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+          <div className="p-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 className="text-sm font-bold text-slate-900">
-                Real Aspirants Standings (Database Records)
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Trophy className="w-4 h-4 text-amber-500" />
+                <span>Aspirants Coin &amp; Rank Leaderboard</span>
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Sorted by overall syllabus completion rate directly from database rows.
+                Ranked by Coins earned — create tests &amp; score high to climb to #1!
               </p>
             </div>
-            <div className="text-xs font-mono text-slate-500 flex items-center gap-1">
-              <Database className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Live Database Standings</span>
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-900">
+              <Coins className="w-3.5 h-3.5 text-amber-600" />
+              <span>{profiles.length} Aspirants Ranked</span>
             </div>
           </div>
 
@@ -548,60 +570,85 @@ export const PeerCompareView: React.FC = () => {
                 <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 font-mono uppercase tracking-wider">
                   <th className="py-3 px-4"># Rank</th>
                   <th className="py-3 px-4">Aspirant</th>
-                  <th className="py-3 px-4">Target AIR &amp; Goal</th>
+                  <th className="py-3 px-4">Coins &amp; Tier</th>
+                  <th className="py-3 px-4">Tests Created</th>
                   <th className="py-3 px-4">Syllabus Complete</th>
                   <th className="py-3 px-4">Hours Studied</th>
-                  <th className="py-3 px-4">PYQ Accuracy</th>
-                  <th className="py-3 px-4">Mock Avg</th>
                   <th className="py-3 px-4">Streak</th>
-                  <th className="py-3 px-4 text-right">Audit</th>
+                  <th className="py-3 px-4 text-right">Profile</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {profiles.map((peer, idx) => {
+                  const coins = peer.coinBalance ?? 0;
+                  const tier = getCoinTier(coins);
                   return (
                     <tr
                       key={peer.id}
                       className={`hover:bg-slate-50/80 transition-colors ${
-                        peer.isCurrentUser ? 'bg-indigo-50/40 font-semibold' : ''
+                        peer.isCurrentUser ? 'bg-indigo-50/50 border-l-4 border-l-indigo-600' : ''
                       }`}
                     >
-                      <td className="py-3 px-4 font-mono font-bold text-slate-700">
-                        {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                      <td className="py-3.5 px-4 font-mono font-bold text-slate-700 whitespace-nowrap">
+                        <span
+                          className={`inline-flex items-center justify-center w-8 h-7 rounded-md border text-xs ${
+                            idx === 0
+                              ? 'bg-amber-100 text-amber-900 border-amber-300'
+                              : idx === 1
+                                ? 'bg-slate-200 text-slate-800 border-slate-300'
+                                : idx === 2
+                                  ? 'bg-orange-100 text-orange-900 border-orange-300'
+                                  : 'bg-slate-50 text-slate-600 border-slate-200'
+                          }`}
+                        >
+                          #{idx + 1}
+                        </span>
                       </td>
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-2">
+                      <td className="py-3.5 px-4">
+                        <div className="flex items-center gap-2.5">
                           <span
-                            className={`w-7 h-7 rounded-lg text-white font-bold text-[10px] flex items-center justify-center ${
-                              peer.isCurrentUser ? 'bg-indigo-700' : 'bg-slate-800'
+                            className={`w-7 h-7 rounded-lg text-white font-bold text-[10px] flex items-center justify-center shrink-0 ${
+                              peer.isCurrentUser
+                                ? 'bg-indigo-700'
+                                : idx === 0
+                                  ? 'bg-amber-500'
+                                  : 'bg-slate-800'
                             }`}
                           >
-                            {peer.fullName.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                            {peer.fullName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
                           </span>
-                          <div>
-                            <div className="font-bold text-slate-900 flex items-center gap-1">
-                              <span>{peer.fullName}</span>
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                              <span className="truncate">{peer.fullName}</span>
                               {peer.isCurrentUser && (
-                                <span className="text-[9px] font-bold bg-indigo-100 text-indigo-700 px-1 rounded">
+                                <span className="text-[9px] font-mono font-bold bg-indigo-100 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded">
                                   YOU
                                 </span>
                               )}
                             </div>
-                            <div className="text-[10px] text-slate-400 font-mono truncate max-w-[140px]">
-                              {peer.email}
+                            <div className="text-[10px] text-slate-500 truncate max-w-[170px]">
+                              Target AIR #{peer.targetAir} · {peer.targetCollege}
                             </div>
                           </div>
                         </div>
                       </td>
-                      <td className="py-3 px-4">
-                        <div className="font-mono font-bold text-indigo-700 text-xs">
-                          AIR #{peer.targetAir}
-                        </div>
-                        <div className="text-[10px] text-slate-500 truncate max-w-[160px]">
-                          {peer.targetCollege}
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-50 border border-amber-200 font-mono tabular-nums font-bold text-amber-900">
+                            <Coins className="w-3.5 h-3.5 text-amber-600" />
+                            {coins.toLocaleString()}
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded border ${tier.badgeClass}`}
+                          >
+                            {tier.shortLabel}
+                          </span>
                         </div>
                       </td>
-                      <td className="py-3 px-4">
+                      <td className="py-3.5 px-4 font-mono tabular-nums font-semibold text-slate-700">
+                        {peer.testsCreated ?? 0}
+                      </td>
+                      <td className="py-3.5 px-4">
                         <div className="flex items-center gap-2">
                           <div className="w-16 bg-slate-200 h-2 rounded-full overflow-hidden">
                             <div
@@ -609,28 +656,24 @@ export const PeerCompareView: React.FC = () => {
                               style={{ width: `${peer.syllabusPercent}%` }}
                             />
                           </div>
-                          <span className="font-mono font-bold text-slate-800">
+                          <span className="font-mono tabular-nums font-bold text-slate-800">
                             {peer.syllabusPercent}%
                           </span>
                         </div>
                       </td>
-                      <td className="py-3 px-4 font-mono text-slate-700 font-medium">
+                      <td className="py-3.5 px-4 font-mono tabular-nums text-slate-700 font-medium">
                         {peer.totalHoursStudied}h
                       </td>
-                      <td className="py-3 px-4 font-mono font-bold text-emerald-600">
-                        {peer.overallPyqAccuracy}%
+                      <td className="py-3.5 px-4 font-mono tabular-nums text-amber-600">
+                        <span className="inline-flex items-center gap-1">
+                          <Flame className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
+                          <span>{peer.studyStreakDays}d</span>
+                        </span>
                       </td>
-                      <td className="py-3 px-4 font-mono text-indigo-700 font-bold">
-                        {peer.mockAverageScore} / 100
-                      </td>
-                      <td className="py-3 px-4 font-mono text-amber-600 flex items-center gap-1">
-                        <Flame className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
-                        <span>{peer.studyStreakDays}d</span>
-                      </td>
-                      <td className="py-3 px-4 text-right">
+                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
                         <button
                           onClick={() => setSelectedPeerForAudit(peer)}
-                          className="px-2.5 py-1 rounded bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold inline-flex items-center gap-1 transition-colors"
+                          className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold inline-flex items-center gap-1 transition-colors"
                         >
                           <Lock className="w-3 h-3 text-slate-400" />
                           <span>Inspect</span>

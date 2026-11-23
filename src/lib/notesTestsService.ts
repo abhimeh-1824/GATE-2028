@@ -91,10 +91,11 @@ function mapDbNote(row: any): StudyNote {
   };
 }
 
-function mapDbTest(row: any, questionCount?: number): LevelTest {
+function mapDbTest(row: any, questionCount?: number, creatorName?: string): LevelTest {
   return {
     id: row.id,
     createdBy: row.created_by,
+    creatorName: creatorName || row.creator_name || undefined,
     entityType: row.entity_type,
     entityId: row.entity_id,
     subjectId: row.subject_id,
@@ -379,7 +380,31 @@ export async function fetchAllLevelTests(isDemo?: boolean): Promise<ServiceResul
     return { data: [], error: error.message };
   }
 
-  return { data: (data || []).map((row) => mapDbTest(row)) };
+  const rows = data || [];
+  const creatorIds = Array.from(
+    new Set(rows.map((r: any) => r.created_by).filter((id: unknown): id is string => typeof id === 'string' && UUID_REGEX.test(id)))
+  );
+
+  const creatorNameMap = new Map<string, string>();
+  if (creatorIds.length > 0) {
+    try {
+      const { data: profilesData } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', creatorIds);
+      (profilesData || []).forEach((p: any) => {
+        if (p?.id && p?.full_name) {
+          creatorNameMap.set(p.id, p.full_name);
+        }
+      });
+    } catch {
+      // Non-fatal: fallback to anonymous/ID label in UI
+    }
+  }
+
+  return {
+    data: rows.map((row: any) => mapDbTest(row, undefined, creatorNameMap.get(row.created_by))),
+  };
 }
 
 export interface CreateTestInput {
@@ -394,6 +419,7 @@ export interface CreateTestInput {
   passingPercentage: number;
   isActive: boolean;
   userId?: string;
+  creatorName?: string;
   isDemo?: boolean;
 }
 
@@ -414,6 +440,7 @@ export async function createLevelTest(
     const newTest: LevelTest = {
       id: generateId(),
       createdBy: input.userId || userId || 'demo_user',
+      creatorName: input.creatorName || 'You',
       entityType: input.entityType,
       entityId: input.entityId,
       subjectId: input.subjectId,
@@ -458,7 +485,7 @@ export async function createLevelTest(
     return { data: null, error: error.message };
   }
 
-  return { data: mapDbTest(data, 0) };
+  return { data: mapDbTest(data, 0, input.creatorName) };
 }
 
 export async function updateLevelTest(

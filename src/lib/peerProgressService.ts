@@ -7,11 +7,13 @@ import {
   SubjectProgressSummary,
   SubjectId,
   TopicStatus,
+  LevelTest,
 } from '../types';
 import { createFreshZeroSubjects } from '../data/gateDaSyllabus';
 import { supabase } from './supabase';
 import { getDeterministicUuid } from './supabaseService';
 import { loadUserStudyState } from './userStudyStateService';
+import { COINS_TEST_CREATE } from './coinService';
 
 
 /**
@@ -106,7 +108,7 @@ export function computeUserProgressProfile(
     overallPyqAccuracy,
     mockTestsTaken: mockTests.length,
     mockAverageScore,
-    studyStreakDays: settings?.streakCount || 1,
+    studyStreakDays: settings?.streakCount ?? 0,
     lastActive: isCurrentUser ? 'Just now (Live)' : 'Recently',
     isCurrentUser,
     subjects: subjectSummaries,
@@ -143,12 +145,11 @@ export async function syncUserProfileAndProgressToDatabase(
 
     const errors: string[] = [];
 
-    // 1. Upsert profile in Supabase profiles table
+    // 1. Upsert profile in Supabase profiles table (never overwrite existing admin/content_manager role)
     const { error: profileErr } = await supabase.from('profiles').upsert(
       {
         id: user.id,
         full_name: user.fullName || settings.userName || 'GATE DA Aspirant',
-        role: 'student',
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'id' }
@@ -210,15 +211,18 @@ export async function syncUserProfileAndProgressToDatabase(
 }
 
 /**
- * Fetches ALL REAL users and their progress directly from the Supabase database.
- * No hardcoding or synthetic demo profiles permitted as cohort data.
+ * Fetches ALL registered users and their progress + coin balances directly from Supabase.
+ * Sorted primarily by Coins earned (with syllabus & hours as tie-breakers) so every aspirant
+ * sees the full community ranking.
  */
 export async function getAllPeerProfilesFromDatabase(
   currentUser: AuthUser | null,
   currentSubjects: Subject[],
   currentHours: number,
   currentMocks: MockTest[],
-  currentSettings: UserSettings
+  currentSettings: UserSettings,
+  currentCoinBalance: number = 0,
+  levelTests: LevelTest[] = []
 ): Promise<{
   profiles: UserProgressProfile[];
   dbConnected: boolean;
@@ -227,11 +231,18 @@ export async function getAllPeerProfilesFromDatabase(
 }> {
   const profilesMap = new Map<string, UserProgressProfile>();
   let dbConnected = false;
-  let dbMessage = 'Connected to Supabase';
+  let dbMessage = 'Live rankings synced';
 
   const isDemo = !currentUser || currentUser.isDemo || currentUser.id.startsWith('demo_');
 
-  // 1. Current user profile (only mark isCurrentUser: true)
+  // Count tests created per user for coin/activity visibility
+  const testsCreatedByUser = new Map<string, number>();
+  levelTests.forEach((t) => {
+    if (!t.createdBy) return;
+    testsCreatedByUser.set(t.createdBy, (testsCreatedByUser.get(t.createdBy) || 0) + 1);
+  });
+
+  // 1. Current user profile (marked isCurrentUser: true)
   if (currentUser) {
     const myProfile = computeUserProgressProfile(
       currentUser,
@@ -241,102 +252,160 @@ export async function getAllPeerProfilesFromDatabase(
       currentSettings,
       true
     );
+    myProfile.coinBalance = currentCoinBalance;
+    myProfile.testsCreated = testsCreatedByUser.get(currentUser.id) || 0;
     profilesMap.set(currentUser.id, myProfile);
   }
 
-  // 2. Query Supabase database for verified cohort profiles
+  // 2. Query Supabase `profiles` for ALL registered aspirants
   try {
     const { data: { session } } = await supabase.auth.getSession();
-    
-    // Only query database if user is authenticated
+
     if (session?.user && !isDemo) {
-      const [profilesRes, progressRes] = await Promise.all([
-        supabase.from('profiles').select('id, full_name, created_at'),
-        supabase.from('subject_progress').select('student_id, subject_id, updated_at'),
-      ]);
+      let remoteProfiles: Array<{
+        id: string;
+        full_name?: string | null;
+        created_at?: string | null;
+        updated_at?: string | null;
+        coin_balance?: number | null;
+      }> = [];
 
-      if (!profilesRes.error) {
-        dbConnected = true;
-        const remoteProfiles = profilesRes.data || [];
-        const remoteProgress = progressRes.data || [];
+      const primaryRes = await supabase
+        .from('profiles')
+        .select('id, full_name, created_at, updated_at, coin_balance')
+        .limit(200);
 
-        // Build set of students with real progress
-        const studentsWithProgress = new Set(remoteProgress.map((p) => p.student_id));
-
-        for (const remote of remoteProfiles) {
-          if (!remote.id || remote.id === currentUser?.id) continue;
-
-          // Only show peer if they have genuine progress records in Supabase database
-          if (!studentsWithProgress.has(remote.id)) continue;
-
-          // Load their isolated user progress from Supabase.
-          const cloudState = await loadUserStudyState(remote.id);
-
-          const pSubjects: Subject[] = Array.isArray(cloudState.state?.subjects)
-            ? cloudState.state.subjects as Subject[]
-            : createFreshZeroSubjects();
-          const pHours: number = typeof cloudState.state?.baseLoggedHours === 'number'
-            ? cloudState.state.baseLoggedHours
-            : 0;
-          const pMocks: MockTest[] = Array.isArray(cloudState.state?.mockTests)
-            ? cloudState.state.mockTests as MockTest[]
-            : [];
-          const pSettings: UserSettings = cloudState.state?.settings && typeof cloudState.state.settings === 'object'
-            ? cloudState.state.settings as UserSettings
-            : {
-                targetAir: 10,
-                targetCollege: 'IISc Bangalore',
-                targetYear: 2028,
-                examDate: '2028-02-12',
-                dailyGoalHours: 4,
-                weeklyGoalHours: 25,
-                streakCount: 1,
-                userName: remote.full_name || 'GATE Aspirant',
-                shareProgressWithCohort: true,
-              };
-
-          // Respect peer's opt-in setting
-          if (pSettings.shareProgressWithCohort === false) {
-            continue;
+      if (primaryRes.error) {
+        // If coin_balance column hasn't been added via SQL migration yet, still load all profiles!
+        const msg = String(primaryRes.error.message || '').toLowerCase();
+        if (primaryRes.error.code === '42703' || msg.includes('coin_balance')) {
+          const fallbackRes = await supabase
+            .from('profiles')
+            .select('id, full_name, created_at, updated_at')
+            .limit(200);
+          if (!fallbackRes.error && fallbackRes.data) {
+            dbConnected = true;
+            remoteProfiles = fallbackRes.data;
+          } else if (fallbackRes.error) {
+            dbMessage = `Could not load aspirants: ${fallbackRes.error.message}`;
           }
-
-          const remoteUser: AuthUser = {
-            id: remote.id,
-            email: '', // Never expose peer email
-            fullName: remote.full_name || 'GATE Aspirant',
-            targetAir: pSettings.targetAir,
-            targetCollege: pSettings.targetCollege,
-            createdAt: remote.created_at || new Date().toISOString(),
-          };
-
-          const prof = computeUserProgressProfile(
-            remoteUser,
-            pSubjects,
-            pHours,
-            pMocks,
-            pSettings,
-            false
-          );
-          profilesMap.set(remote.id, prof);
+        } else {
+          dbMessage = `Could not load aspirants: ${primaryRes.error.message}`;
         }
       } else {
-        dbMessage = `Database notice: ${profilesRes.error.message}`;
+        dbConnected = true;
+        remoteProfiles = primaryRes.data || [];
+      }
+
+      if (dbConnected && remoteProfiles.length > 0) {
+        // Load any readable study state in parallel without blocking or hiding peers
+        await Promise.all(
+          remoteProfiles.map(async (remote) => {
+            if (!remote.id) return;
+
+            const createdTestsCount = testsCreatedByUser.get(remote.id) || 0;
+            const dbCoins =
+              typeof remote.coin_balance === 'number'
+                ? remote.coin_balance
+                : createdTestsCount * COINS_TEST_CREATE;
+
+            if (remote.id === currentUser?.id) {
+              const existingMe = profilesMap.get(remote.id);
+              if (existingMe) {
+                existingMe.coinBalance = Math.max(existingMe.coinBalance ?? 0, dbCoins);
+                existingMe.testsCreated = createdTestsCount;
+              }
+              return;
+            }
+
+            let cloudState: { state: any } = { state: null };
+            try {
+              cloudState = await loadUserStudyState(remote.id);
+            } catch {
+              // Peer study state is private by RLS; still show the aspirant on the leaderboard
+            }
+
+            const pSubjects: Subject[] = Array.isArray(cloudState.state?.subjects)
+              ? (cloudState.state.subjects as Subject[])
+              : createFreshZeroSubjects();
+            const pHours: number =
+              typeof cloudState.state?.baseLoggedHours === 'number'
+                ? cloudState.state.baseLoggedHours
+                : 0;
+            const pMocks: MockTest[] = Array.isArray(cloudState.state?.mockTests)
+              ? (cloudState.state.mockTests as MockTest[])
+              : [];
+            const pSettings: UserSettings =
+              cloudState.state?.settings && typeof cloudState.state.settings === 'object'
+                ? (cloudState.state.settings as UserSettings)
+                : {
+                    targetAir: 10,
+                    targetCollege: 'IISc Bangalore (M.Tech AI)',
+                    targetYear: 2028,
+                    examDate: '2028-02-12',
+                    dailyGoalHours: 4,
+                    weeklyGoalHours: 25,
+                    streakCount: 0,
+                    userName: remote.full_name || 'GATE Aspirant',
+                    shareProgressWithCohort: true,
+                  };
+
+            // Only hide if peer explicitly opted out inside readable settings
+            if (pSettings.shareProgressWithCohort === false) {
+              return;
+            }
+
+            const remoteUser: AuthUser = {
+              id: remote.id,
+              email: '',
+              fullName: remote.full_name || 'GATE Aspirant',
+              targetAir: pSettings.targetAir,
+              targetCollege: pSettings.targetCollege,
+              createdAt: remote.created_at || new Date().toISOString(),
+            };
+
+            const prof = computeUserProgressProfile(
+              remoteUser,
+              pSubjects,
+              pHours,
+              pMocks,
+              pSettings,
+              false
+            );
+            prof.coinBalance = dbCoins;
+            prof.testsCreated = createdTestsCount;
+            if (remote.updated_at) {
+              try {
+                prof.lastActive = new Intl.DateTimeFormat('en-IN', {
+                  day: '2-digit',
+                  month: 'short',
+                }).format(new Date(remote.updated_at));
+              } catch {
+                prof.lastActive = 'Active';
+              }
+            }
+            profilesMap.set(remote.id, prof);
+          })
+        );
       }
     } else {
       dbMessage = isDemo
-        ? 'Demo mode active. Live cohort leaderboard requires an authenticated account.'
-        : 'Sign in to connect to the verified cohort database.';
+        ? 'Demo mode active. Sign in to compete with all GATE DA aspirants.'
+        : 'Sign in to view live community rankings.';
     }
   } catch (err: any) {
     console.warn('Supabase peer profiles fetch notice:', err);
-    dbMessage = 'Offline / Local database mode';
+    dbMessage = 'Offline mode';
   }
 
-  // 3. Peer profiles are sourced only from Supabase; browser account caches are not used.
-
-  const profilesList = Array.from(profilesMap.values()).sort(
-    (a, b) => b.syllabusPercent - a.syllabusPercent
-  );
+  // Sort strictly by Coins DESC, then Syllabus %, then Study Hours, then Name
+  const profilesList = Array.from(profilesMap.values()).sort((a, b) => {
+    const coinDiff = (b.coinBalance ?? 0) - (a.coinBalance ?? 0);
+    if (coinDiff !== 0) return coinDiff;
+    if (b.syllabusPercent !== a.syllabusPercent) return b.syllabusPercent - a.syllabusPercent;
+    if (b.totalHoursStudied !== a.totalHoursStudied) return b.totalHoursStudied - a.totalHoursStudied;
+    return a.fullName.localeCompare(b.fullName);
+  });
 
   return {
     profiles: profilesList,
